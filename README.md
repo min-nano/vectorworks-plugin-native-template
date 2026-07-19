@@ -57,16 +57,26 @@ cmake -S . -B build -DVW_SDK_DIR=/path/to/sdk \
 This plug-in is for internal use and is shipped **unsigned** (no Apple Developer
 ID signing and no Vectorworks developer credentials). To install and run it:
 
-1. **Copy the bundle** into your Vectorworks 2026 user folder's `Plug-Ins`
-   directory (find it via Vectorworks ▸ Preferences ▸ *User Folders*). The
-   `.vwr` resource is already inside the bundle, so just the `HelloVW.vwlibrary`
-   folder is needed.
+1. **Put the bundle on a local disk** (not iCloud Drive — iCloud can re-apply
+   the download quarantine flag) and into your Vectorworks 2026 user folder's
+   `Plug-Ins` directory (find it via Vectorworks ▸ Preferences ▸ *User Folders*).
+   The `.vwr` resource is already inside the bundle, so just the
+   `HelloVW.vwlibrary` folder is needed.
 
-2. **If you downloaded the bundle** (e.g. the CI artifact zip) rather than built
-   it locally, clear the macOS quarantine flag so Gatekeeper doesn't block it:
+2. **Clear the macOS quarantine flag** so Gatekeeper doesn't block the
+   downloaded bundle:
 
    ```sh
    xattr -dr com.apple.quarantine HelloVW.vwlibrary
+   ```
+
+   CI builds are already **ad-hoc code-signed** (required so Apple Silicon will
+   load the binary at all — this is free and is not Developer ID signing). If
+   you built locally the linker ad-hoc-signs automatically. If macOS still says
+   the bundle is "damaged", re-sign it yourself:
+
+   ```sh
+   codesign --force --deep --sign - HelloVW.vwlibrary
    ```
 
 3. **Launch Vectorworks.** Because the plug-in is unsigned, Vectorworks 2026

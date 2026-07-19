@@ -95,6 +95,20 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -v
 
+      # Apple Silicon requires every Mach-O to carry a code signature. We use a
+      # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
+      # kernel to load the plug-in. This is NOT Apple Developer ID signing or
+      # Vectorworks credentials; the plug-in is still "unsigned" in that sense and
+      # will show the usual unknown-plug-in warning. Done after the build so the
+      # signature seals the packaged .vwr resource too.
+      - name: Ad-hoc code-sign the bundle
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - build/HelloVW.vwlibrary
+          echo "Verifying signature:"
+          codesign --verify --strict --verbose=2 build/HelloVW.vwlibrary
+          codesign -dvv build/HelloVW.vwlibrary 2>&1 | grep -Ei "Signature|Identifier|TeamIdentifier" || true
+
       - name: Inspect built plug-in
         run: |
           set -euo pipefail
