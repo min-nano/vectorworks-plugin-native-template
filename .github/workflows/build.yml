@@ -51,7 +51,8 @@ jobs:
           unzip -q "$work/sdk.zip" -d "$work/extracted"
 
           # The zip may wrap everything in a top-level folder, so locate SDKLib.
-          sdklib="$(find "$work/extracted" -type d -name SDKLib -print -quit)"
+          # Skip the "__MACOSX" AppleDouble metadata mirror that macOS zips add.
+          sdklib="$(find "$work/extracted" -type d -name SDKLib -not -path '*/__MACOSX/*' -print -quit)"
           if [ -z "$sdklib" ]; then
             echo "::error::Could not find SDKLib inside the downloaded SDK."
             exit 1
