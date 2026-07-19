@@ -109,8 +109,20 @@ jobs:
             || { echo "::error::HelloVW.vwr was not packaged into the bundle"; exit 1; }
           ls -l "$bundle/Contents/Resources/"
 
+      # Stage the bundle under a clean directory so the artifact zip keeps the
+      # "HelloVW.vwlibrary/" wrapper folder. If we uploaded build/HelloVW.vwlibrary
+      # directly, the zip root would be its *contents* (Contents/...), and tools
+      # that auto-unzip (e.g. Safari) would leave a bare "Contents" folder instead
+      # of a usable .vwlibrary bundle.
+      - name: Stage bundle for artifact
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          cp -R build/HelloVW.vwlibrary dist/
+
       - name: Upload plug-in artifact
         uses: actions/upload-artifact@v4
         with:
           name: HelloVW-vwlibrary
-          path: build/HelloVW.vwlibrary
+          path: dist
