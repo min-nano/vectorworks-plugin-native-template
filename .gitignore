@@ -1,0 +1,16 @@
+# Build output
+/build/
+/dist/
+*.vwlibrary
+
+# Local copy of the Vectorworks SDK
+/vw-sdk/
+*-SDK.zip
+
+# macOS
+.DS_Store
+
+# Xcode / editors
+*.xcuserstate
+xcuserdata/
+.vscode/

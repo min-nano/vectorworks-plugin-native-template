@@ -1,0 +1,142 @@
+name: Build plug-in
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Apple Silicon runner (macos-14 and macos-15 are arm64).
+    runs-on: macos-15
+
+    env:
+      # URL of the Vectorworks 2026 mac SDK (~800 MB download).
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip
+      # Where the trimmed SDK lives after the first download. This directory is
+      # what gets cached, so we never download the 800 MB zip more than once.
+      VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
+      # Bump the "v" suffix to force a fresh SDK download (e.g. after Vectorworks
+      # publishes a new "latest" SDK).
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.2
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.2"
+
+      # Restore the previously trimmed SDK if we have it. Only SDKLib/Include and
+      # SDKLib/LibMac are kept, so the cache is a few tens of MB rather than 800.
+      - name: Restore Vectorworks SDK cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      - name: Download and trim Vectorworks SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          echo "Downloading SDK (this is large, ~800 MB)..."
+          curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$VW_SDK_URL"
+
+          echo "Extracting..."
+          unzip -q "$work/sdk.zip" -d "$work/extracted"
+
+          # The zip may wrap everything in a top-level folder, so locate SDKLib.
+          # Skip the "__MACOSX" AppleDouble metadata mirror that macOS zips add.
+          sdklib="$(find "$work/extracted" -type d -name SDKLib -not -path '*/__MACOSX/*' -print -quit)"
+          if [ -z "$sdklib" ]; then
+            echo "::error::Could not find SDKLib inside the downloaded SDK."
+            exit 1
+          fi
+          echo "Found SDKLib at: $sdklib"
+
+          # Keep only the pieces needed to build a mac plug-in:
+          #  - Include: headers
+          #  - LibMac:  libVWSDK.a and the VWMM framework
+          #  - Source:  some Include/ headers #include ../../../Source/VWSDK/...
+          #  - ToolsMac: the BuildVWR tool that packages the .vwr resource
+          mkdir -p "$VW_SDK_DIR/SDKLib"
+          cp -R "$sdklib/Include" "$VW_SDK_DIR/SDKLib/Include"
+          cp -R "$sdklib/LibMac" "$VW_SDK_DIR/SDKLib/LibMac"
+          cp -R "$sdklib/Source" "$VW_SDK_DIR/SDKLib/Source"
+          cp -R "$sdklib/ToolsMac" "$VW_SDK_DIR/SDKLib/ToolsMac"
+
+          # Make sure the BuildVWR tool is runnable (executable, not quarantined).
+          chmod +x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR" || true
+          xattr -dr com.apple.quarantine "$VW_SDK_DIR/SDKLib/ToolsMac" 2>/dev/null || true
+
+          rm -rf "$work"
+          echo "Trimmed SDK size:"
+          du -sh "$VW_SDK_DIR"
+
+      - name: Verify SDK is present
+        run: |
+          set -euo pipefail
+          test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
+          test -f "$VW_SDK_DIR/SDKLib/LibMac/Release/libVWSDK.a"
+          test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
+          echo "SDK looks good."
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR"
+
+      - name: Build
+        run: cmake --build build --config Release -v
+
+      # Apple Silicon requires every Mach-O to carry a code signature. We use a
+      # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
+      # kernel to load the plug-in. This is NOT Apple Developer ID signing or
+      # Vectorworks credentials; the plug-in is still "unsigned" in that sense and
+      # will show the usual unknown-plug-in warning. Done after the build so the
+      # signature seals the packaged .vwr resource too.
+      - name: Ad-hoc code-sign the bundle
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - build/HelloVW.vwlibrary
+          echo "Verifying signature:"
+          codesign --verify --strict --verbose=2 build/HelloVW.vwlibrary
+          codesign -dvv build/HelloVW.vwlibrary 2>&1 | grep -Ei "Signature|Identifier|TeamIdentifier" || true
+
+      - name: Inspect built plug-in
+        run: |
+          set -euo pipefail
+          bundle="build/HelloVW.vwlibrary"
+          test -d "$bundle" || { echo "::error::$bundle was not produced"; exit 1; }
+          echo "Bundle contents:"
+          find "$bundle" -maxdepth 3
+          echo "Architectures of the plug-in binary:"
+          lipo -info "$bundle/Contents/MacOS/HelloVW"
+          echo "Checking the .vwr resource was packaged into the bundle:"
+          test -e "$bundle/Contents/Resources/HelloVW.vwr" \
+            || { echo "::error::HelloVW.vwr was not packaged into the bundle"; exit 1; }
+          ls -l "$bundle/Contents/Resources/"
+
+      # Stage the bundle under a clean directory so the artifact zip keeps the
+      # "HelloVW.vwlibrary/" wrapper folder. If we uploaded build/HelloVW.vwlibrary
+      # directly, the zip root would be its *contents* (Contents/...), and tools
+      # that auto-unzip (e.g. Safari) would leave a bare "Contents" folder instead
+      # of a usable .vwlibrary bundle.
+      - name: Stage bundle for artifact
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          cp -R build/HelloVW.vwlibrary dist/
+
+      - name: Upload plug-in artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HelloVW-vwlibrary
+          path: dist
