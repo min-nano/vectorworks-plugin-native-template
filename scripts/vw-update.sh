@@ -18,10 +18,9 @@
 #   ./scripts/vw-update.sh stable
 #   ./scripts/vw-update.sh dev
 #
-# Requirements:
-#   * macOS (uses osascript dialogs, codesign, xattr).
-#   * GitHub CLI `gh`, authenticated once with `gh auth login` (this repo may be
-#     private, and release assets then require authentication).
+# Requirements: macOS only. Uses tools that ship with macOS (curl, plutil,
+# unzip, codesign, xattr, osascript) — no Homebrew, no `gh`, and because the
+# repository is public, no authentication.
 #
 # Overridable via environment:
 #   VW_REPO         owner/repo             (default below)
@@ -33,6 +32,7 @@ set -euo pipefail
 VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 VW_PLUGINS_DIR="${VW_PLUGINS_DIR:-$HOME/Library/Application Support/Vectorworks/2026/Plug-Ins}"
 VW_APP_NAME="${VW_APP_NAME:-}"
+VW_API="https://api.github.com/repos/${VW_REPO}"
 
 # ---------------------------------------------------------------------------
 # Small AppleScript UI helpers. Values are passed as argv (never interpolated
@@ -88,6 +88,46 @@ APPLESCRIPT
 }
 
 # ---------------------------------------------------------------------------
+# GitHub REST helpers (public repo -> unauthenticated). JSON is parsed with
+# plutil, which ships with macOS and reads JSON natively.
+# ---------------------------------------------------------------------------
+api_get() { # api-subpath -> path to a temp file holding the JSON, or fail
+	local f; f="$(mktemp)"
+	if curl -fsSL -H "Accept: application/vnd.github+json" "${VW_API}/$1" -o "$f"; then
+		printf '%s' "$f"
+	else
+		rm -f "$f"; return 1
+	fi
+}
+
+jval() { # json-file, keypath -> raw scalar value (empty if missing)
+	plutil -extract "$2" raw -o - "$1" 2>/dev/null || true
+}
+
+# asset_url: find the browser_download_url of an asset by name.
+#   file   the JSON file
+#   prefix keypath of the assets array ("assets" for a single release object,
+#          "<i>.assets" for element i of a releases array)
+#   want   the asset file name to match
+asset_url() { # file, prefix, want
+	local f="$1" pfx="$2" want="$3" j=0 nm
+	while [ "$j" -lt 30 ]; do
+		nm="$(jval "$f" "${pfx}.${j}.name")"
+		[ -n "$nm" ] || break
+		if [ "$nm" = "$want" ]; then
+			jval "$f" "${pfx}.${j}.browser_download_url"
+			return 0
+		fi
+		j=$((j + 1))
+	done
+	return 1
+}
+
+download() { # url, out-file
+	curl -fL --retry 3 "$1" -o "$2"
+}
+
+# ---------------------------------------------------------------------------
 # Plug-in / Vectorworks helpers.
 # ---------------------------------------------------------------------------
 installed_commit() { # bundle-path -> stamped VWBuildCommit or "none"
@@ -140,7 +180,7 @@ restart_vw() { # app-name (may be empty)
 	open -a "$app" >/dev/null 2>&1 || die "Vectorworks ($app) を再起動できませんでした。手動で起動してください。"
 }
 
-# apply: run the chosen action (skip / update only / update+restart).
+# apply_choice: run the chosen action (skip / update only / update+restart).
 apply_choice() { # choice, zip, name
 	local choice="$1" zip="$2" name="$3"
 	case "$choice" in
@@ -164,40 +204,57 @@ apply_choice() { # choice, zip, name
 # Channel flows.
 # ---------------------------------------------------------------------------
 update_stable() {
-	local latest_full latest short installed choice tmp
-	latest_full="$(gh release view stable --repo "$VW_REPO" --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")"
-	[ -n "$latest_full" ] || die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
-	latest="${latest_full:0:7}"
-	installed="$(installed_commit "$VW_PLUGINS_DIR/HelloVW.vwlibrary")"
+	local f; f="$(api_get "releases/tags/stable")" \
+		|| die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
+	local latest_full; latest_full="$(jval "$f" target_commitish)"
+	local url; url="$(asset_url "$f" "assets" "HelloVW.vwlibrary.zip" || true)"
+	rm -f "$f"
+	[ -n "$latest_full" ] || die "安定版リリースの情報を取得できませんでした。"
+	[ -n "$url" ] || die "安定版のアセット (HelloVW.vwlibrary.zip) が見つかりません。"
+
+	local latest="${latest_full:0:7}"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HelloVW.vwlibrary")"
 
 	if [ "$installed" = "$latest" ]; then
 		alert "HelloVW (stable)" "既に最新です（build ${installed}）。"
 		return
 	fi
 
-	choice="$(ask3 "HelloVW (stable)" "新しい安定版ビルドがあります。
+	local choice; choice="$(ask3 "HelloVW (stable)" "新しい安定版ビルドがあります。
 インストール済み: ${installed}
 最新: ${latest}
 
 どうしますか？")"
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
-	tmp="$(mktemp -d)"
-	gh release download stable --repo "$VW_REPO" --pattern 'HelloVW.vwlibrary.zip' --dir "$tmp" --clobber \
-		|| die "安定版アセットのダウンロードに失敗しました。"
+	local tmp; tmp="$(mktemp -d)"
+	download "$url" "$tmp/HelloVW.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
 	apply_choice "$choice" "$tmp/HelloVW.vwlibrary.zip" "HelloVW"
 	rm -rf "$tmp"
 }
 
 update_dev() {
+	local f; f="$(api_get "releases?per_page=100")" \
+		|| die "リリース一覧を取得できませんでした。"
+
 	# Collect the per-branch dev prereleases.
-	local names=() tags=() commits=()
-	local nm tg cm
-	while IFS=$'\t' read -r nm tg cm; do
-		[ -n "$tg" ] || continue
-		names+=("$nm"); tags+=("$tg"); commits+=("$cm")
-	done < <(gh api "repos/$VW_REPO/releases?per_page=100" \
-		--jq '.[] | select(.tag_name|startswith("dev-")) | [.name, .tag_name, .target_commitish] | @tsv' 2>/dev/null || true)
+	local names=() tags=() commits=() urls=()
+	local i=0 tag name commit url
+	while [ "$i" -lt 100 ]; do
+		tag="$(jval "$f" "${i}.tag_name")"
+		[ -n "$tag" ] || break
+		case "$tag" in
+			dev-*)
+				name="$(jval "$f" "${i}.name")"
+				commit="$(jval "$f" "${i}.target_commitish")"
+				url="$(asset_url "$f" "${i}.assets" "HelloVWDev.vwlibrary.zip" || true)"
+				[ -n "$name" ] || name="$tag"
+				names+=("$name"); tags+=("$tag"); commits+=("$commit"); urls+=("$url")
+				;;
+		esac
+		i=$((i + 1))
+	done
+	rm -f "$f"
 
 	[ "${#tags[@]}" -gt 0 ] || die "開発版ビルド (dev-*) がまだありません。対象ブランチを push してビルドを走らせてください。"
 
@@ -205,12 +262,14 @@ update_dev() {
 	[ -n "$chosen_name" ] || { echo "cancelled."; return; }
 
 	# Resolve the chosen entry.
-	local idx=-1 i
+	local idx=-1
 	for i in "${!names[@]}"; do
 		if [ "${names[$i]}" = "$chosen_name" ]; then idx="$i"; break; fi
 	done
 	[ "$idx" -ge 0 ] || die "選択したビルドを特定できませんでした。"
-	local tag="${tags[$idx]}" latest="${commits[$idx]:0:7}"
+
+	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
+	[ -n "$url2" ] || die "選択したビルドのアセット (HelloVWDev.vwlibrary.zip) が見つかりません。"
 	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HelloVWDev.vwlibrary")"
 
 	local same_note=""
@@ -225,16 +284,14 @@ ${same_note}インストール済み: ${installed}
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	gh release download "$tag" --repo "$VW_REPO" --pattern 'HelloVWDev.vwlibrary.zip' --dir "$tmp" --clobber \
-		|| die "開発版アセットのダウンロードに失敗しました。"
+	download "$url2" "$tmp/HelloVWDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
 	apply_choice "$choice" "$tmp/HelloVWDev.vwlibrary.zip" "HelloVWDev"
 	rm -rf "$tmp"
 }
 
 # ---------------------------------------------------------------------------
 main() {
-	command -v gh >/dev/null 2>&1 || die "GitHub CLI 'gh' が必要です。'brew install gh' の後 'gh auth login' を実行してください。"
-	gh auth status >/dev/null 2>&1 || die "'gh' が未認証です。'gh auth login' を実行してください。"
+	command -v curl >/dev/null 2>&1 || die "curl が見つかりません（macOS で実行してください）。"
 
 	local channel="${1:-}"
 	if [ -z "$channel" ]; then

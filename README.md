@@ -142,11 +142,11 @@ update and restart Vectorworks). It de-quarantines and ad-hoc re-signs the
 bundle for you, and "更新して再起動" quits and relaunches Vectorworks so the new
 build actually loads (compiled plug-ins are only read at startup).
 
-```sh
-# One-time setup: this repo may be private, so release assets need auth.
-brew install gh        # if not already installed
-gh auth login
+The repository is public, so no authentication or extra tooling is needed — the
+script uses only what ships with macOS (`curl`, `plutil`, `unzip`, `codesign`,
+`xattr`, `osascript`).
 
+```sh
 # Stable channel (main → HelloVW):
 ./scripts/vw-update.sh stable
 
