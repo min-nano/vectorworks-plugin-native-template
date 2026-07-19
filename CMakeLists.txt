@@ -108,3 +108,30 @@ target_link_libraries(HelloVW PRIVATE
 	"-framework Carbon"
 	"-framework Cocoa"
 )
+
+# --- Build the .vwr resource into the bundle --------------------------------
+# The menu command's title/category/help text lives in resources/HelloVW.vwr
+# (a folder of .vwstrings files). The SDK's BuildVWR tool packages it and, in
+# Release mode, writes a no-compression zip to Contents/Resources/HelloVW.vwr
+# inside the bundle. The base name "HelloVW" must match the identifier returned
+# by DefaultPluginVWRIdentifier() in ModuleMain.cpp.
+set(VW_BUILDVWR "${VW_SDK_DIR}/SDKLib/ToolsMac/BuildVWR/BuildVWR")
+set(VWR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources/HelloVW.vwr")
+
+if(EXISTS "${VW_BUILDVWR}")
+	add_custom_command(TARGET HelloVW POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_BUNDLE_CONTENT_DIR:HelloVW>/Resources"
+		COMMAND "${CMAKE_COMMAND}" -E env
+			"VWR_INPUT=${VWR_SOURCE_DIR}"
+			"VWR_OUTPUT=$<TARGET_BUNDLE_CONTENT_DIR:HelloVW>/Resources/HelloVW.vwr"
+			"VWR_MODE=Release"
+			"${VW_BUILDVWR}"
+		VERBATIM
+		COMMENT "Packaging HelloVW.vwr resource into the bundle")
+else()
+	message(WARNING
+		"BuildVWR tool not found at '${VW_BUILDVWR}'. The plug-in will build, "
+		"but its menu command will have no display name. Ensure SDKLib/ToolsMac "
+		"is present in VW_SDK_DIR.")
+endif()

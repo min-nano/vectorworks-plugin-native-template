@@ -19,7 +19,7 @@ jobs:
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
       # Bump the "v" suffix to force a fresh SDK download (e.g. after Vectorworks
       # publishes a new "latest" SDK).
-      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v2
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
 
     steps:
       - name: Checkout
@@ -59,13 +59,20 @@ jobs:
           fi
           echo "Found SDKLib at: $sdklib"
 
-          # Keep only the pieces needed to build a mac plug-in. Source is kept
-          # because some SDK headers under Include/ pull in files from
-          # ../../../Source/VWSDK via relative #includes.
+          # Keep only the pieces needed to build a mac plug-in:
+          #  - Include: headers
+          #  - LibMac:  libVWSDK.a and the VWMM framework
+          #  - Source:  some Include/ headers #include ../../../Source/VWSDK/...
+          #  - ToolsMac: the BuildVWR tool that packages the .vwr resource
           mkdir -p "$VW_SDK_DIR/SDKLib"
           cp -R "$sdklib/Include" "$VW_SDK_DIR/SDKLib/Include"
           cp -R "$sdklib/LibMac" "$VW_SDK_DIR/SDKLib/LibMac"
           cp -R "$sdklib/Source" "$VW_SDK_DIR/SDKLib/Source"
+          cp -R "$sdklib/ToolsMac" "$VW_SDK_DIR/SDKLib/ToolsMac"
+
+          # Make sure the BuildVWR tool is runnable (executable, not quarantined).
+          chmod +x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR" || true
+          xattr -dr com.apple.quarantine "$VW_SDK_DIR/SDKLib/ToolsMac" 2>/dev/null || true
 
           rm -rf "$work"
           echo "Trimmed SDK size:"
@@ -76,6 +83,7 @@ jobs:
           set -euo pipefail
           test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
           test -f "$VW_SDK_DIR/SDKLib/LibMac/Release/libVWSDK.a"
+          test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
           echo "SDK looks good."
 
       - name: Configure
@@ -96,6 +104,10 @@ jobs:
           find "$bundle" -maxdepth 3
           echo "Architectures of the plug-in binary:"
           lipo -info "$bundle/Contents/MacOS/HelloVW"
+          echo "Checking the .vwr resource was packaged into the bundle:"
+          test -e "$bundle/Contents/Resources/HelloVW.vwr" \
+            || { echo "::error::HelloVW.vwr was not packaged into the bundle"; exit 1; }
+          ls -l "$bundle/Contents/Resources/"
 
       - name: Upload plug-in artifact
         uses: actions/upload-artifact@v4

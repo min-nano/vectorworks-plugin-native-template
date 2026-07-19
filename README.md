@@ -16,10 +16,15 @@ src/
   Extensions/ExtMenu.{h,cpp}  The menu command that shows the alert
   PluginPrefix.h            Shared prefix header (pulls in the SDK)
   Module-Info.plist         Bundle Info.plist
+resources/
+  HelloVW.vwr/Strings/HelloVW.vwstrings  Menu title/category/help text
 .github/workflows/build.yml CI: builds on an Apple Silicon macOS runner
 ```
 
-The build output is `HelloVW.vwlibrary`, a loadable macOS bundle.
+The build output is `HelloVW.vwlibrary`, a loadable macOS bundle. The menu
+command's display text comes from `resources/HelloVW.vwr`, which the SDK's
+`BuildVWR` tool packages into `HelloVW.vwlibrary/Contents/Resources/HelloVW.vwr`
+during the build, so the bundle is self-contained.
 
 ## Building locally
 
@@ -47,13 +52,35 @@ cmake -S . -B build -DVW_SDK_DIR=/path/to/sdk \
   -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 ```
 
-## Installing the plug-in
+## Installing and running (internal / unsigned use)
 
-Copy `HelloVW.vwlibrary` into your Vectorworks user folder's `Plug-Ins`
-directory, then add the command to a workspace (Tools ▸ Workspaces) so it shows
-up in a menu. Note that Vectorworks 2026 requires SDK plug-ins to carry a
-developer credentials (satellite) file to load in a shipping build; that is a
-distribution concern and is not needed to compile.
+This plug-in is for internal use and is shipped **unsigned** (no Apple Developer
+ID signing and no Vectorworks developer credentials). To install and run it:
+
+1. **Copy the bundle** into your Vectorworks 2026 user folder's `Plug-Ins`
+   directory (find it via Vectorworks ▸ Preferences ▸ *User Folders*). The
+   `.vwr` resource is already inside the bundle, so just the `HelloVW.vwlibrary`
+   folder is needed.
+
+2. **If you downloaded the bundle** (e.g. the CI artifact zip) rather than built
+   it locally, clear the macOS quarantine flag so Gatekeeper doesn't block it:
+
+   ```sh
+   xattr -dr com.apple.quarantine HelloVW.vwlibrary
+   ```
+
+3. **Launch Vectorworks.** Because the plug-in is unsigned, Vectorworks 2026
+   shows an "unknown/unsigned plug-in" warning at startup and may disable it by
+   default. Acknowledge the warning and enable the plug-in — this is expected
+   for internal, uncredentialed plug-ins and is fine for in-house use.
+
+4. **Add the command to your workspace:** Tools ▸ Workspaces ▸ Edit Current
+   Workspace ▸ *Menus*. Under the **HomesKZ** category you'll find the
+   **起動確認** command; drag it into a menu. Running it shows the alert.
+
+Getting Vectorworks developer credentials (the 2026 "satellite" file) is only
+needed to ship a *signed* plug-in with no warning; it is not required to build
+or to run internally.
 
 ## Continuous integration
 
