@@ -19,7 +19,7 @@ jobs:
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
       # Bump the "v" suffix to force a fresh SDK download (e.g. after Vectorworks
       # publishes a new "latest" SDK).
-      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v1
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v2
 
     steps:
       - name: Checkout
@@ -59,10 +59,13 @@ jobs:
           fi
           echo "Found SDKLib at: $sdklib"
 
-          # Keep only the pieces needed to build a mac plug-in.
+          # Keep only the pieces needed to build a mac plug-in. Source is kept
+          # because some SDK headers under Include/ pull in files from
+          # ../../../Source/VWSDK via relative #includes.
           mkdir -p "$VW_SDK_DIR/SDKLib"
           cp -R "$sdklib/Include" "$VW_SDK_DIR/SDKLib/Include"
           cp -R "$sdklib/LibMac" "$VW_SDK_DIR/SDKLib/LibMac"
+          cp -R "$sdklib/Source" "$VW_SDK_DIR/SDKLib/Source"
 
           rm -rf "$work"
           echo "Trimmed SDK size:"
