@@ -10,21 +10,40 @@ when run, shows an alert dialog announcing that it started. Real functionality
 ## Layout
 
 ```
-CMakeLists.txt              CMake build for the macOS plug-in bundle
+CMakeLists.txt              CMake build for the macOS plug-in bundles
 src/
   ModuleMain.cpp            Module entry point; registers the extension
   Extensions/ExtMenu.{h,cpp}  The menu command that shows the alert
+  BuildConfig.h             Stable vs. dev identity switch (VW_DEV_BUILD)
   PluginPrefix.h            Shared prefix header (pulls in the SDK)
-  Module-Info.plist         Bundle Info.plist
+  Module-Info.plist.in      Bundle Info.plist template (filled in per build)
 resources/
-  HelloVW.vwr/Strings/HelloVW.vwstrings  Menu title/category/help text
+  HelloVW.vwr/…             Menu strings for the stable plug-in
+  HelloVWDev.vwr/…          Menu strings for the dev plug-in
+scripts/
+  vw-update.sh              Download the latest CI build and install it
 .github/workflows/build.yml CI: builds on an Apple Silicon macOS runner
 ```
 
-The build output is `HelloVW.vwlibrary`, a loadable macOS bundle. The menu
-command's display text comes from `resources/HelloVW.vwr`, which the SDK's
-`BuildVWR` tool packages into `HelloVW.vwlibrary/Contents/Resources/HelloVW.vwr`
-during the build, so the bundle is self-contained.
+The same source builds **two coexisting plug-ins** from a single switch
+(`VW_DEV_BUILD`, see `src/BuildConfig.h`):
+
+- **`HelloVW.vwlibrary`** — the *stable* plug-in, built from `main`. Menu
+  category **HomesKZ**.
+- **`HelloVWDev.vwlibrary`** — the *dev* plug-in, built from feature/PR
+  branches. Menu category **HomesKZ (Dev)**.
+
+They have distinct bundle names, `.vwr` identifiers, VCOM universal names and
+extension UUIDs, so both can be installed and loaded at the same time — the
+stable build for normal use, the dev build for trying out an in-progress branch.
+Each bundle's menu command shows its channel and build commit in the alert, and
+that commit is also stamped into the bundle's `Info.plist`
+(`VWBuildChannel` / `VWBuildCommit`) so the updater can tell what's installed.
+
+Each menu command's display text comes from its `resources/<name>.vwr` folder,
+which the SDK's `BuildVWR` tool packages into
+`<name>.vwlibrary/Contents/Resources/<name>.vwr` during the build, so each
+bundle is self-contained.
 
 ## Building locally
 
@@ -94,11 +113,51 @@ or to run internally.
 
 ## Continuous integration
 
-`.github/workflows/build.yml` builds the plug-in on every push:
+`.github/workflows/build.yml` builds the plug-ins on every push:
 
 - Runs on `macos-15` (Apple Silicon) and selects Xcode 16.2.
 - Downloads the SDK once and **caches** the (trimmed) SDK so the ~800 MB zip is
   not re-downloaded on later runs. Bump `VW_SDK_CACHE_KEY` in the workflow to
   force a fresh download.
-- Builds `HelloVW.vwlibrary`, checks its architecture, and uploads it as a
-  build artifact.
+- Builds **both** `HelloVW.vwlibrary` and `HelloVWDev.vwlibrary`, stamps them
+  with the commit (`-DVW_BUILD_VERSION`), ad-hoc-signs them, checks their
+  architecture, and uploads them as build artifacts.
+- **Publishes a downloadable release** so the updater has a stable URL to fetch:
+  - a push to **`main`** refreshes the rolling **`stable`** release with
+    `HelloVW.vwlibrary.zip`;
+  - a push to **any other branch** refreshes a per-branch **`dev-<branch>`**
+    prerelease with `HelloVWDev.vwlibrary.zip`.
+
+  Both are rolling — the tag is re-pointed at the newest build each time.
+
+## Auto-update (自動アップデート)
+
+`scripts/vw-update.sh` downloads the latest CI build and installs it into your
+Vectorworks 2026 `Plug-Ins` folder, so you can verify a new build without
+manually downloading, de-quarantining and copying it.
+
+It checks the latest build, tells you whether a newer one is available, then
+lets you choose **更新しない / 更新だけ / 更新して再起動** (skip / update only /
+update and restart Vectorworks). It de-quarantines and ad-hoc re-signs the
+bundle for you, and "更新して再起動" quits and relaunches Vectorworks so the new
+build actually loads (compiled plug-ins are only read at startup).
+
+```sh
+# One-time setup: this repo may be private, so release assets need auth.
+brew install gh        # if not already installed
+gh auth login
+
+# Stable channel (main → HelloVW):
+./scripts/vw-update.sh stable
+
+# Dev channel — pick which branch's build to install (→ HelloVWDev):
+./scripts/vw-update.sh dev
+
+# No argument (or double-click in Finder): asks which channel first.
+./scripts/vw-update.sh
+```
+
+Overridable via environment: `VW_REPO` (owner/repo), `VW_PLUGINS_DIR` (install
+location), `VW_APP_NAME` (app to restart). The two channels install
+separately-named bundles, so the stable and dev plug-ins never overwrite each
+other.

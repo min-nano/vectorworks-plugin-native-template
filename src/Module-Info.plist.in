@@ -5,13 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>HelloVW</string>
+	<string>@VW_BUNDLE_NAME@</string>
 	<key>CFBundleIdentifier</key>
-	<string>net.homeskz.vectorworks.HelloVW</string>
+	<string>@VW_BUNDLE_ID@</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>HelloVW</string>
+	<string>@VW_BUNDLE_NAME@</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleSignature</key>
@@ -22,5 +22,11 @@
 	<string>1.0</string>
 	<key>CSResourcesFileMapped</key>
 	<string>yes</string>
+	<!-- Build provenance, stamped by CMake/CI. The updater scripts read these
+	     to tell which build is installed vs. what is available to download. -->
+	<key>VWBuildChannel</key>
+	<string>@VW_BUILD_CHANNEL@</string>
+	<key>VWBuildCommit</key>
+	<string>@VW_BUILD_VERSION@</string>
 </dict>
 </plist>

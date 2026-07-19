@@ -7,11 +7,13 @@
 //
 
 #include "PluginPrefix.h"
+#include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
-// run time. Change this if you rename the plug-in.
-const char* DefaultPluginVWRIdentifier() { return "HelloVW"; }
+// run time. Must match the base name of the packaged .vwr ("HelloVW.vwr" for
+// the stable build, "HelloVWDev.vwr" for the dev build). See BuildConfig.h.
+const char* DefaultPluginVWRIdentifier() { return PLUGIN_VWR_ID; }
 
 //------------------------------------------------------------------
 // Report the SDK version this plug-in was compiled against so Vectorworks can
