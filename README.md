@@ -1,20 +1,10 @@
 # vectorworks-plugin-native-template
 
-C++ SDK でネイティブな Vectorworks 2026 プラグインを作るための**テンプレート**です。
+C++ SDK でネイティブな Vectorworks 2026 プラグインを作るためのテンプレートです。
 
-この GitHub リポジトリは**テンプレートリポジトリ**として設定されています。GitHub の
-**Use this template ▸ Create a new repository** から、フォークではなく独立した新しい
-リポジトリを作成して使い始めてください。ビルドシステム・CI・リリース／アップデート
-の仕組みまで揃った**最小構成の動くプラグイン**が入っています。サンプルのプラグイン
-はメニューコマンドを 1 つ追加するだけで、実行すると「起動した」ことを知らせるアラート
-ダイアログを表示します。これを自分の拡張機能に置き換え、この土台の上に本来の機能を
-作り込んでいってください。
-
-> 以下に出てくるサンプルの識別子 — `SamplePlugin` / `SamplePluginDev`、バンドル ID
-> `com.example.vectorworks.*`、メニューカテゴリ **Sample** — はすべてプレースホルダー
-> です。実際のプラグインを始めるときは、これらを（`scripts/vw-update.sh` の `VW_REPO`
-> 既定値も含めて）自分の名前に置き換えてください。具体的な手順は
-> [テンプレートの使い方（改名手順）](#テンプレートの使い方改名手順)を参照してください。
+ビルドシステム・CI・リリース／アップデートの仕組みまで揃った**最小構成の動く
+プラグイン**が入っています。サンプルのプラグインはメニューコマンドを 1 つ追加する
+だけで、実行すると「起動した」ことを知らせるアラートダイアログを表示します。
 
 ## 構成
 
@@ -53,43 +43,6 @@ scripts/
 来ます。ビルド時に SDK の `BuildVWR` ツールがこれを
 `<name>.vwlibrary/Contents/Resources/<name>.vwr` にパッケージするので、各バンドルは
 自己完結しています。
-
-## テンプレートの使い方（改名手順）
-
-このテンプレートを実際のプラグインに使うときは、プレースホルダーの識別子を自分の
-ものに置き換えます。下表の左側を右側（例）に置換していってください。
-
-| 対象 | プレースホルダー | 置換する場所 |
-| --- | --- | --- |
-| バンドル／出力名（stable） | `SamplePlugin` | `CMakeLists.txt`（`project()`・`add_vw_plugin`）、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`.github/workflows/build.yml`、本 README |
-| バンドル／出力名（dev） | `SamplePluginDev` | 同上 |
-| バンドル ID | `com.example.vectorworks.SamplePlugin(Dev)` | `CMakeLists.txt` の `add_vw_plugin` 第 3 引数 |
-| メニューカテゴリ | `Sample` / `Sample (Dev)` | `resources/*/Strings/*.vwstrings` の `category` |
-| C++ 名前空間 | `SamplePlugin` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
-| C++ クラス | `CExtMenuSample` / `CSampleMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}` |
-| VCOM ユニバーサル名 | `CExtMenuSample_SamplePlugin(Dev)` | `src/BuildConfig.h` |
-| リポジトリ | `min-nano/vectorworks-plugin-native-template` | `scripts/vw-update.sh` の `VW_REPO` 既定値 |
-| 表示名・ヘルプ文言 | 「起動確認」など | `resources/*/Strings/*.vwstrings` |
-
-多くはテキストの一括置換で済みます（`SamplePluginDev` を先に置換してから
-`SamplePlugin` を置換すると安全です）。ただし次の 2 点は手作業が必要です。
-
-- **拡張機能 UUID は必ず新しく生成してください。** `src/Extensions/ExtMenu.cpp` に
-  stable / dev それぞれ 1 つずつ UUID があります。UUID はプラグインごとに世界で一意
-  でなければならず、コピーしたまま使うと他のプラグインと衝突します。macOS で
-  `uuidgen` を実行して 2 つ生成し、`IMPLEMENT_VWMenuExtension` の該当行を置き換え、
-  コメントの UUID 文字列も合わせて更新してください。
-
-- **`.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。** バイナリ扱いのエディタや
-  エンコーディングを保持できるツールで編集してください。エンコーディングが崩れると
-  `BuildVWR` がメニュー文字列を正しく読めなくなります。
-
-置換後は、旧識別子が残っていないか一括検索で確認しておくと安全です。
-
-```sh
-grep -rniE "sampleplugin|com\.example|CExtMenuSample|CSampleMenu" \
-  --exclude-dir=.git .
-```
 
 ## ローカルでのビルド
 
