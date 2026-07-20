@@ -128,13 +128,23 @@ or to run internally.
   - a push to **any other branch** refreshes a per-branch **`dev-<branch>`**
     prerelease with `HelloVWDev.vwlibrary.zip`.
 
-  Both are rolling — the tag is re-pointed at the newest build each time.
+  Both are rolling — the tag is re-pointed at the newest build each time. The
+  **stable** publish retries through an extended GitHub API outage (a missed
+  stable release could otherwise go unnoticed); the **dev** publish does not
+  retry — dev builds are only used while working on a branch, so just re-run the
+  job if a transient error hits it.
 
 `.github/workflows/cleanup-dev-release.yml` deletes a branch's `dev-<branch>`
 prerelease (and its tag) when that branch is deleted, so dev builds don't pile
 up. Because it is triggered by the `delete` event, it runs from the copy on the
 default branch and therefore only cleans up branches deleted after it lands on
 `main`.
+
+`.github/workflows/stable-release-healthcheck.yml` runs on a schedule (every 6
+hours) as a safety net: if the published `stable` release has drifted from the
+tip of `main` — i.e. a stable publish was missed — it re-dispatches `build.yml`
+on `main` to rebuild and republish. Like all scheduled/`delete` workflows it
+runs from the default branch, so it is active once merged to `main`.
 
 ## Auto-update (自動アップデート)
 

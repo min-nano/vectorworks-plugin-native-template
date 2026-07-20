@@ -161,7 +161,10 @@ jobs:
       # other -> refresh a per-branch "dev-<branch>" prerelease with HelloVWDev.
       # Rolling tags are deleted and recreated so they always point at this build.
       - name: Publish stable release (main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # Runs on a push to main, and on a manual/scheduled re-dispatch of this
+        # workflow on main (the health-check workflow uses that to republish a
+        # stable release that was missed — see stable-release-healthcheck.yml).
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -173,8 +176,11 @@ jobs:
           commit=${GITHUB_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          # Delete + recreate as one unit, retried with backoff so a transient
-          # GitHub API hiccup (e.g. a 504) doesn't fail the build.
+          # Delete + recreate as one unit. A missed stable release can go
+          # unnoticed, so retry with a long backoff to ride out an extended
+          # GitHub API outage. If every attempt still fails, the scheduled
+          # stable-release-healthcheck.yml notices the drift and re-dispatches
+          # this build to republish.
           publish() {
             gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
             gh release create stable "dist/HelloVW.vwlibrary.zip" \
@@ -184,13 +190,15 @@ jobs:
               --notes-file notes.txt \
               --latest
           }
-          delay=5
-          for attempt in 1 2 3 4 5; do
-            if publish; then exit 0; fi
-            echo "publish attempt $attempt failed; retrying in ${delay}s..."
-            sleep "$delay"; delay=$((delay * 2))
+          publish && exit 0 || true
+          attempts=1
+          for delay in 30 60 120 300 600; do
+            echo "publish attempt $attempts failed; retrying in ${delay}s..."
+            sleep "$delay"
+            attempts=$((attempts + 1))
+            publish && exit 0 || true
           done
-          echo "::error::Failed to publish the stable release after 5 attempts."
+          echo "::error::Failed to publish the stable release after $attempts attempts."
           exit 1
 
       - name: Publish dev prerelease (feature/PR branches)
@@ -210,22 +218,14 @@ jobs:
           commit=${GITHUB_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          # Delete + recreate as one unit, retried with backoff so a transient
-          # GitHub API hiccup (e.g. a 504) doesn't fail the build.
-          publish() {
-            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-            gh release create "$tag" "dist/HelloVWDev.vwlibrary.zip" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Dev: ${branch} (${short})" \
-              --notes-file notes.txt \
-              --prerelease
-          }
-          delay=5
-          for attempt in 1 2 3 4 5; do
-            if publish; then exit 0; fi
-            echo "publish attempt $attempt failed; retrying in ${delay}s..."
-            sleep "$delay"; delay=$((delay * 2))
-          done
-          echo "::error::Failed to publish the dev prerelease after 5 attempts."
-          exit 1
+          # Dev builds are only used while actively working on a branch, so no
+          # retry: if a transient GitHub API error fails this, just re-run the
+          # job manually. (The stable release, which could go unnoticed, does
+          # retry and has a scheduled health check.)
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$tag" "dist/HelloVWDev.vwlibrary.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Dev: ${branch} (${short})" \
+            --notes-file notes.txt \
+            --prerelease
