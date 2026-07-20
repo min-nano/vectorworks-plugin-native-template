@@ -44,6 +44,28 @@ scripts/
 `<name>.vwlibrary/Contents/Resources/<name>.vwr` にパッケージするので、各バンドルは
 自己完結しています。
 
+## プレースホルダー識別子
+
+サンプル固有の識別子は次の通りです。実際のプラグインではこれらを置き換えます。
+
+| 種別 | 値 | 場所 |
+| --- | --- | --- |
+| バンドル／出力名 | `SamplePlugin` / `SamplePluginDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`.github/workflows/build.yml` |
+| バンドル ID | `com.example.vectorworks.SamplePlugin(Dev)` | `CMakeLists.txt` |
+| メニューカテゴリ | `Sample` / `Sample (Dev)` | `resources/*/Strings/*.vwstrings` |
+| C++ 名前空間・クラス | `SamplePlugin` / `CExtMenuSample` / `CSampleMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
+| VCOM ユニバーサル名 | `CExtMenuSample_SamplePlugin(Dev)` | `src/BuildConfig.h` |
+| 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
+| リポジトリ | `min-nano/vectorworks-plugin-native-template` | `scripts/vw-update.sh` の `VW_REPO` 既定値 |
+
+`.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。編集時はエンコーディングを保持
+してください。現在の識別子は次で一覧できます。
+
+```sh
+grep -rniE "sampleplugin|com\.example|CExtMenuSample|CSampleMenu" \
+  --exclude-dir=.git .
+```
+
 ## ローカルでのビルド
 
 macOS と Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）、および
