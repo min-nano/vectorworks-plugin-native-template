@@ -128,7 +128,7 @@ jobs:
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION"
 
       - name: Build
-        # Builds both the stable (HelloVW) and dev (HelloVWDev) bundles.
+        # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) bundles.
         run: cmake --build build --config Release -v
 
       # Apple Silicon requires every Mach-O to carry a code signature. We use a
@@ -140,7 +140,7 @@ jobs:
       - name: Ad-hoc code-sign the bundles
         run: |
           set -euo pipefail
-          for name in HelloVW HelloVWDev; do
+          for name in SamplePlugin SamplePluginDev; do
             bundle="build/$name.vwlibrary"
             codesign --force --deep --sign - "$bundle"
             echo "Verifying signature for $name:"
@@ -150,7 +150,7 @@ jobs:
       - name: Inspect built plug-ins
         run: |
           set -euo pipefail
-          for name in HelloVW HelloVWDev; do
+          for name in SamplePlugin SamplePluginDev; do
             bundle="build/$name.vwlibrary"
             test -d "$bundle" || { echo "::error::$bundle was not produced"; exit 1; }
             echo "== $name =="
@@ -171,7 +171,7 @@ jobs:
           set -euo pipefail
           rm -rf dist stage
           mkdir -p dist
-          for name in HelloVW HelloVWDev; do
+          for name in SamplePlugin SamplePluginDev; do
             rm -rf "stage/$name"
             mkdir -p "stage/$name"
             cp -R "build/$name.vwlibrary" "stage/$name/"
@@ -186,8 +186,8 @@ jobs:
           path: dist
 
       # --- Publish a downloadable release --------------------------------------
-      # main  -> refresh the rolling "stable" release with the HelloVW bundle.
-      # other -> refresh a per-branch "dev-<branch>" prerelease with HelloVWDev.
+      # main  -> refresh the rolling "stable" release with the SamplePlugin bundle.
+      # other -> refresh a per-branch "dev-<branch>" prerelease with SamplePluginDev.
       # Rolling tags are deleted and recreated so they always point at this build.
       - name: Publish stable release (main)
         # Runs on a push to main, and on a manual/scheduled re-dispatch of this
@@ -214,7 +214,7 @@ jobs:
           # this build to republish.
           publish() {
             gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-            gh release create stable "dist/HelloVW.vwlibrary.zip" \
+            gh release create stable "dist/SamplePlugin.vwlibrary.zip" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
               --title "Stable (${short})" \
@@ -259,7 +259,7 @@ jobs:
           # job manually. (The stable release, which could go unnoticed, does
           # retry and has a scheduled health check.)
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-          gh release create "$tag" "dist/HelloVWDev.vwlibrary.zip" \
+          gh release create "$tag" "dist/SamplePluginDev.vwlibrary.zip" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$BUILD_SHA" \
             --title "Dev: ${branch} (${short})" \

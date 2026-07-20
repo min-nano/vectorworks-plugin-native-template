@@ -4,8 +4,8 @@
 //	Central place for the plug-in's build-time identity. The exact same source
 //	code is compiled into two coexisting plug-ins:
 //
-//	  * the STABLE plug-in ("HelloVW"),    built from the `main` branch, and
-//	  * the DEV plug-in    ("HelloVWDev"), built from feature / PR branches.
+//	  * the STABLE plug-in ("SamplePlugin"),    built from the `main` branch, and
+//	  * the DEV plug-in    ("SamplePluginDev"), built from feature / PR branches.
 //
 //	They must have DIFFERENT identifiers (bundle name, .vwr identifier, VCOM
 //	universal name and extension UUID) so Vectorworks can load BOTH at the same
@@ -18,14 +18,14 @@
 
 #ifdef VW_DEV_BUILD
 	// Dev plug-in identity.
-	#define PLUGIN_VWR_ID			"HelloVWDev"
-	#define PLUGIN_UNIVERSAL_NAME	"CExtMenuHello_HelloVWDev"
-	#define PLUGIN_DISPLAY_NAME		"HelloVW (Dev)"
+	#define PLUGIN_VWR_ID			"SamplePluginDev"
+	#define PLUGIN_UNIVERSAL_NAME	"CExtMenuSample_SamplePluginDev"
+	#define PLUGIN_DISPLAY_NAME		"SamplePlugin (Dev)"
 #else
 	// Stable plug-in identity.
-	#define PLUGIN_VWR_ID			"HelloVW"
-	#define PLUGIN_UNIVERSAL_NAME	"CExtMenuHello_HelloVW"
-	#define PLUGIN_DISPLAY_NAME		"HelloVW"
+	#define PLUGIN_VWR_ID			"SamplePlugin"
+	#define PLUGIN_UNIVERSAL_NAME	"CExtMenuSample_SamplePlugin"
+	#define PLUGIN_DISPLAY_NAME		"SamplePlugin"
 #endif
 
 // Build channel, as a human-readable string ("stable" / "dev").
