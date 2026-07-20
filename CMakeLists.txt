@@ -69,6 +69,13 @@ if(NOT DEFINED VW_BUILD_VERSION)
 	set(VW_BUILD_VERSION "local" CACHE STRING "Short build identifier (git commit)")
 endif()
 
+# Git branch this build came from ("main" for stable, the feature/PR branch for
+# a dev build, "local" otherwise). CI passes it via -DVW_BUILD_BRANCH; shown in
+# the menu command's alert next to the channel.
+if(NOT DEFINED VW_BUILD_BRANCH)
+	set(VW_BUILD_BRANCH "local" CACHE STRING "Git branch this build came from")
+endif()
+
 set(VW_BUILDVWR "${VW_SDK_DIR}/SDKLib/ToolsMac/BuildVWR/BuildVWR")
 
 if(NOT EXISTS "${VW_BUILDVWR}")
@@ -103,6 +110,7 @@ function(add_vw_plugin target output_name bundle_id channel)
 	set(VW_BUNDLE_NAME "${output_name}")
 	set(VW_BUNDLE_ID   "${bundle_id}")
 	set(VW_BUILD_CHANNEL "${channel}")
+	# VW_BUILD_BRANCH and VW_BUILD_VERSION come from the parent scope (CI/-D).
 	set(plist "${CMAKE_CURRENT_BINARY_DIR}/${target}-Info.plist")
 	configure_file(
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/Module-Info.plist.in"
@@ -128,10 +136,12 @@ function(add_vw_plugin target output_name bundle_id channel)
 		"${CMAKE_CURRENT_SOURCE_DIR}/src"
 	)
 
-	# RELEASE_BLD: link against the Release SDK. VW_BUILD_VERSION: build stamp.
+	# RELEASE_BLD: link against the Release SDK. VW_BUILD_VERSION/VW_BUILD_BRANCH:
+	# build stamp (commit + branch), shown in the menu command's alert.
 	target_compile_definitions(${target} PRIVATE
 		RELEASE_BLD=1
 		"VW_BUILD_VERSION=\"${VW_BUILD_VERSION}\""
+		"VW_BUILD_BRANCH=\"${VW_BUILD_BRANCH}\""
 	)
 	if(ARG_DEV)
 		target_compile_definitions(${target} PRIVATE VW_DEV_BUILD=1)

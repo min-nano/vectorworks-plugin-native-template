@@ -44,3 +44,11 @@
 #ifndef VW_BUILD_VERSION
 	#define VW_BUILD_VERSION		"local"
 #endif
+
+// Git branch the build came from ("main" for stable, the feature/PR branch for
+// a dev build, or "local" for a local build). CMake passes this in via
+// -DVW_BUILD_BRANCH=...; like the commit it is stamped into the Info.plist and
+// shown in the menu command's alert so a dev build can be traced to its branch.
+#ifndef VW_BUILD_BRANCH
+	#define VW_BUILD_BRANCH			"local"
+#endif

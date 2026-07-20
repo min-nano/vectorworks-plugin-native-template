@@ -121,11 +121,13 @@ jobs:
       - name: Configure
         env:
           VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
+          VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
-            -DVW_BUILD_VERSION="$VW_BUILD_VERSION"
+            -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
 
       - name: Build
         # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) bundles.
@@ -160,6 +162,7 @@ jobs:
               || { echo "::error::$name.vwr was not packaged into the bundle"; exit 1; }
             echo "Build stamp:"
             /usr/libexec/PlistBuddy -c "Print :VWBuildChannel" "$bundle/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Print :VWBuildBranch"  "$bundle/Contents/Info.plist"
             /usr/libexec/PlistBuddy -c "Print :VWBuildCommit"  "$bundle/Contents/Info.plist"
           done
 

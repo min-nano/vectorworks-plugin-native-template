@@ -26,6 +26,8 @@
 	     to tell which build is installed vs. what is available to download. -->
 	<key>VWBuildChannel</key>
 	<string>@VW_BUILD_CHANNEL@</string>
+	<key>VWBuildBranch</key>
+	<string>@VW_BUILD_BRANCH@</string>
 	<key>VWBuildCommit</key>
 	<string>@VW_BUILD_VERSION@</string>
 </dict>
