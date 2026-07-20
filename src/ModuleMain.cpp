@@ -9,6 +9,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
+#include "Updater.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
 // run time. Must match the base name of the packaged .vwr ("SamplePlugin.vwr"
@@ -34,6 +35,15 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
 {
 	// Initialize the VCOM (Vectorworks Component Object Model) mechanism.
 	::GS_InitializeVCOM( cbp );
+
+#ifndef VW_DEV_BUILD
+	// Stable plug-in: at Vectorworks start-up, kick off a background check for a
+	// newer stable build. It stays silent when already current and only prompts
+	// when an update is available. This runs when Vectorworks loads the module
+	// (which it does at start-up to build the workspace), and is guarded so it
+	// fires only once per session. Non-blocking, so it never delays start-up.
+	SamplePlugin::LaunchStableStartupCheck();
+#endif
 
 	Sint32	reply	= 0L;
 

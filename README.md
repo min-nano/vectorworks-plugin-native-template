@@ -11,8 +11,11 @@ C++ SDK でネイティブな Vectorworks 2026 プラグインを作るための
 ```
 CMakeLists.txt              macOS プラグインバンドルの CMake ビルド
 src/
-  ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録する
-  Extensions/ExtMenu.{h,cpp}  アラートを表示するメニューコマンド
+  ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、
+                            stable では起動時アップデート確認を仕掛ける
+  Extensions/ExtMenu.{h,cpp}  アラートを表示するメニューコマンド（dev では
+                            実行時にブランチ選択アップデートを起動）
+  Updater.{h,cpp}           同梱した vw-update.sh を起動してアップデートを駆動する
   BuildConfig.h             stable / dev の識別切り替えスイッチ（VW_DEV_BUILD）
   PluginPrefix.h            共有プレフィックスヘッダ（SDK を取り込む）
   Module-Info.plist.in      バンドルの Info.plist テンプレート（ビルドごとに埋める）
@@ -20,7 +23,8 @@ resources/
   SamplePlugin.vwr/…             stable プラグインのメニュー文字列
   SamplePluginDev.vwr/…          dev プラグインのメニュー文字列
 scripts/
-  vw-update.sh              最新の CI ビルドをダウンロードしてインストールする
+  vw-update.sh              CI ビルドをダウンロード／インストールする（バンドルに
+                            同梱され、プラグインから起動される）
 .github/workflows/build.yml CI: Apple Silicon の macOS ランナーでビルドする
 ```
 
@@ -174,17 +178,38 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 
 ## 自動アップデート
 
-`scripts/vw-update.sh` は最新の CI ビルドをダウンロードして Vectorworks 2026 の
-`Plug-Ins` フォルダにインストールします。手動でのダウンロード・隔離解除・コピーを
-せずに、新しいビルドを確認できます。
+アップデートはコマンドラインではなく、**プラグイン自身がダイアログを出して**行います。
+更新の実処理（GitHub API の参照・ダウンロード・`Plug-Ins` へのインストール・隔離解除・
+アドホック再署名・ダイアログ表示）は `scripts/vw-update.sh` に集約されており、これは
+ビルド時に各バンドルの `Contents/Resources/vw-update.sh` に**同梱**されます。プラグイン
+（`src/Updater.cpp`）が適切なタイミングでこのスクリプトを起動するため、利用者が
+ターミナルを開く必要はありません。
 
-最新ビルドを確認して、より新しいものがあるかを知らせたうえで、**更新しない /
-更新だけ** を選ばせます。バンドルの隔離解除とアドホック再署名はスクリプトが行います。
-コンパイル済みプラグインは起動時にしか読み込まれないため、新しいビルドを実際にロード
-するには、次回 Vectorworks を起動（または手動で再起動）したときに反映されます。
+チャンネルごとに挙動が異なります。
+
+- **stable（`SamplePlugin` / main）** — **Vectorworks 起動時**に、より新しい安定版
+  ビルドがないかをバックグラウンドで確認します（`src/ModuleMain.cpp` がモジュール
+  ロード時に一度だけ起動）。
+  - 既に最新なら**何も表示しません**（毎回の起動を邪魔しません）。
+  - 新しいビルドがあれば「インストールしますか？」ダイアログを表示し、選ばれた場合だけ
+    インストールします。
+  - 起動を止めないよう非同期（バックグラウンド）で実行し、ネットワークエラー時は静かに
+    諦めます。
+
+- **dev（`SamplePluginDev` / ブランチ）** — **コマンド実行時**に、どのブランチの開発版
+  ビルドを使うかを問い合わせます（`src/Extensions/ExtMenu.cpp` の `DoInterface`）。
+  - 選んだビルドが現在インストール済みのものと**異なればインストール**します。
+  - **インストール済みと同じ**なら何もせず、そのままプラグインを実行します。
+
+コンパイル済みプラグインは起動時にしか読み込まれないため、新しいビルドが実際にロード
+されるのは次回 Vectorworks を起動（または手動で再起動）したときです。バンドルの隔離
+解除とアドホック再署名はスクリプトが行います。
 
 リポジトリは公開なので、認証や追加ツールは不要です。スクリプトは macOS に標準で付属
 するもの（`curl`・`plutil`・`unzip`・`codesign`・`xattr`・`osascript`）だけを使います。
+
+プラグインを経由せず、スクリプトを直接実行することもできます（手動確認・トラブル
+シュート用）:
 
 ```sh
 # stable チャンネル（main → SamplePlugin）:
@@ -195,6 +220,10 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 
 # 引数なし（または Finder でダブルクリック）: 最初にチャンネルを尋ねます。
 ./scripts/vw-update.sh
+
+# プラグインが内部的に使うモード:
+./scripts/vw-update.sh startup-stable   # 起動時の stable 確認（最新なら無音）
+./scripts/vw-update.sh dev-pick         # dev のブランチ選択＋差分インストール
 ```
 
 環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）。

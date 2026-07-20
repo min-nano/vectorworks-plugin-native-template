@@ -13,10 +13,23 @@
 # let you choose: 更新しない / 更新だけ (skip / update only). The new build is
 # loaded the next time you (re)start Vectorworks yourself.
 #
+# The plug-in itself drives its own updates by invoking this same script (it is
+# bundled inside the .vwlibrary, see src/Updater.cpp), so nobody has to open a
+# terminal. Two extra, dialog-only modes exist for that:
+#
+#   startup-stable  Silent when already current; only when a newer stable build
+#                   exists does it prompt (install / later). The stable plug-in
+#                   runs this in the background at Vectorworks start-up.
+#   dev-pick        Ask which branch's dev build to use; install it only if it
+#                   differs from what is installed, otherwise do nothing. The dev
+#                   plug-in runs this when its menu command is invoked.
+#
 # Usage:
 #   ./scripts/vw-update.sh            # ask which channel (or double-click)
 #   ./scripts/vw-update.sh stable
 #   ./scripts/vw-update.sh dev
+#   ./scripts/vw-update.sh startup-stable   # (invoked by the plug-in)
+#   ./scripts/vw-update.sh dev-pick         # (invoked by the plug-in)
 #
 # Requirements: macOS only. Uses tools that ship with macOS (curl, plutil,
 # unzip, codesign, xattr, osascript) — no Homebrew, no `gh`, and because the
@@ -67,6 +80,20 @@ on run argv
 		return r
 	on error number -128
 		return "更新しない"
+	end try
+end run
+APPLESCRIPT
+}
+
+# ask_install: yes/no install prompt. Echoes "インストール" or "後で" (cancel -> 後で).
+ask_install() { # title, message
+	osascript - "$1" "$2" <<'APPLESCRIPT' 2>/dev/null || echo "後で"
+on run argv
+	try
+		set r to button returned of (display dialog (item 2 of argv) with title (item 1 of argv) buttons {"後で", "インストール"} default button "インストール" cancel button "後で")
+		return r
+	on error number -128
+		return "後で"
 	end try
 end run
 APPLESCRIPT
@@ -265,6 +292,110 @@ ${same_note}インストール済み: ${installed}
 }
 
 # ---------------------------------------------------------------------------
+# Plug-in-driven flows (dialog only; no "already latest" nag, no terminal).
+# ---------------------------------------------------------------------------
+
+# update_stable_startup: the stable plug-in runs this in the background at
+# Vectorworks start-up. Stays SILENT when already current; only when a newer
+# stable build exists does it ask (install / later) and install if chosen.
+# Transient errors (e.g. offline) fail silently — a start-up check must never
+# interrupt the user with scary alerts.
+update_stable_startup() {
+	# Let Vectorworks finish launching before any dialog can steal focus.
+	sleep 5
+
+	local f; f="$(api_get "releases/tags/stable")" || return 0
+	local latest_full; latest_full="$(jval "$f" target_commitish)"
+	local url; url="$(asset_url "$f" "assets" "SamplePlugin.vwlibrary.zip" || true)"
+	rm -f "$f"
+	[ -n "$latest_full" ] || return 0
+	[ -n "$url" ] || return 0
+
+	local latest="${latest_full:0:7}"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePlugin.vwlibrary")"
+
+	# Already up to date -> stay silent (don't nag on every launch).
+	[ "$installed" != "$latest" ] || { echo "up to date ($installed)."; return 0; }
+
+	local choice; choice="$(ask_install "SamplePlugin (stable)" "新しい安定版ビルドがあります。
+インストール済み: ${installed}
+最新: ${latest}
+
+今すぐインストールしますか？")"
+	[ "$choice" = "インストール" ] || { echo "skipped."; return 0; }
+
+	local tmp; tmp="$(mktemp -d)"
+	if ! download "$url" "$tmp/SamplePlugin.vwlibrary.zip"; then
+		rm -rf "$tmp"
+		alert "SamplePlugin (stable)" "ダウンロードに失敗しました。ネットワークを確認して、あとで再度お試しください。"
+		return 0
+	fi
+	install_zip "$tmp/SamplePlugin.vwlibrary.zip" "SamplePlugin"
+	rm -rf "$tmp"
+	notify "SamplePlugin アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
+}
+
+# update_dev_pick: the dev plug-in runs this when its menu command is invoked.
+# Asks which branch's dev build to use; installs it only if it differs from the
+# installed one, otherwise does nothing (the plug-in then just runs as loaded).
+update_dev_pick() {
+	local f; f="$(api_get "releases?per_page=100")" \
+		|| { alert "SamplePlugin (dev)" "リリース一覧を取得できませんでした。ネットワークを確認してください。"; return 0; }
+
+	# Collect the per-branch dev prereleases.
+	local names=() tags=() commits=() urls=()
+	local i=0 tag name commit url
+	while [ "$i" -lt 100 ]; do
+		tag="$(jval "$f" "${i}.tag_name")"
+		[ -n "$tag" ] || break
+		case "$tag" in
+			dev-*)
+				name="$(jval "$f" "${i}.name")"
+				commit="$(jval "$f" "${i}.target_commitish")"
+				url="$(asset_url "$f" "${i}.assets" "SamplePluginDev.vwlibrary.zip" || true)"
+				[ -n "$name" ] || name="$tag"
+				names+=("$name"); tags+=("$tag"); commits+=("$commit"); urls+=("$url")
+				;;
+		esac
+		i=$((i + 1))
+	done
+	rm -f "$f"
+
+	[ "${#tags[@]}" -gt 0 ] || { alert "SamplePlugin (dev)" "開発版ビルド (dev-*) がまだありません。対象ブランチを push してビルドを走らせてください。"; return 0; }
+
+	local chosen_name; chosen_name="$(choose_one "使用する開発版ビルド（ブランチ）を選んでください:" "${names[@]}")"
+	[ -n "$chosen_name" ] || { echo "cancelled."; return 0; }
+
+	# Resolve the chosen entry.
+	local idx=-1
+	for i in "${!names[@]}"; do
+		if [ "${names[$i]}" = "$chosen_name" ]; then idx="$i"; break; fi
+	done
+	[ "$idx" -ge 0 ] || return 0
+
+	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
+	[ -n "$url2" ] || { alert "SamplePlugin (dev)" "選択したビルドのアセット (SamplePluginDev.vwlibrary.zip) が見つかりません。"; return 0; }
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePluginDev.vwlibrary")"
+
+	# Already the installed build -> nothing to do; the plug-in just runs.
+	if [ "$installed" = "$latest" ]; then
+		echo "already installed ($latest)."
+		notify "SamplePlugin (dev)" "選択したビルド (${latest}) は既にインストール済みです。"
+		return 0
+	fi
+
+	local tmp; tmp="$(mktemp -d)"
+	if ! download "$url2" "$tmp/SamplePluginDev.vwlibrary.zip"; then
+		rm -rf "$tmp"
+		alert "SamplePlugin (dev)" "開発版アセットのダウンロードに失敗しました。"
+		return 0
+	fi
+	install_zip "$tmp/SamplePluginDev.vwlibrary.zip" "SamplePluginDev"
+	rm -rf "$tmp"
+	notify "SamplePlugin (dev)" "${chosen_name} (${latest}) をインストールしました。反映するには Vectorworks を再起動してください。"
+}
+
+# ---------------------------------------------------------------------------
 main() {
 	command -v curl >/dev/null 2>&1 || die "curl が見つかりません（macOS で実行してください）。"
 
@@ -279,9 +410,11 @@ main() {
 	fi
 
 	case "$channel" in
-		stable) update_stable ;;
-		dev)    update_dev ;;
-		*)      die "不明なチャンネル: '$channel'（stable か dev を指定してください）。" ;;
+		stable)         update_stable ;;
+		dev)            update_dev ;;
+		startup-stable) update_stable_startup ;;
+		dev-pick)       update_dev_pick ;;
+		*)      die "不明なチャンネル: '$channel'（stable / dev / startup-stable / dev-pick）。" ;;
 	esac
 }
 

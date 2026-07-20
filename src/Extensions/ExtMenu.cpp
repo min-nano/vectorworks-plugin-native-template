@@ -7,6 +7,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
+#include "Updater.h"
 
 using namespace SamplePlugin;
 
@@ -73,6 +74,16 @@ CSampleMenu_EventSink::~CSampleMenu_EventSink()
 
 void CSampleMenu_EventSink::DoInterface()
 {
+#ifdef VW_DEV_BUILD
+	// Dev plug-in: before running, let the user choose which branch's dev build
+	// to use. The bundled updater installs it only if it differs from the one
+	// already installed; if it matches, nothing happens and we just run as
+	// loaded. A freshly installed build is picked up on the next Vectorworks
+	// launch (a compiled plug-in can only be swapped in at start-up), so the
+	// alert below still reports the build that is currently loaded.
+	SamplePlugin::RunDevBranchPicker();
+#endif
+
 	// This is the whole point of the plug-in for now: tell the user it ran,
 	// and show exactly which build is loaded so a freshly-installed update can
 	// be verified at a glance. VW_BUILD_BRANCH is the git branch the build came
