@@ -130,6 +130,12 @@ or to run internally.
 
   Both are rolling — the tag is re-pointed at the newest build each time.
 
+`.github/workflows/cleanup-dev-release.yml` deletes a branch's `dev-<branch>`
+prerelease (and its tag) when that branch is deleted, so dev builds don't pile
+up. Because it is triggered by the `delete` event, it runs from the copy on the
+default branch and therefore only cleans up branches deleted after it lands on
+`main`.
+
 ## Auto-update (自動アップデート)
 
 `scripts/vw-update.sh` downloads the latest CI build and installs it into your
