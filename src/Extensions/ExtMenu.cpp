@@ -76,10 +76,11 @@ void CSampleMenu_EventSink::DoInterface()
 	// This is the whole point of the plug-in for now: tell the user it ran,
 	// and show exactly which build is loaded so a freshly-installed update can
 	// be verified at a glance. VW_BUILD_BRANCH is the git branch the build came
-	// from (shown in parentheses after the channel) and VW_BUILD_VERSION is its
-	// short commit hash (labelled "commit:"), so a dev/PR build can be traced
-	// back to its exact branch and source revision at a glance. Both are "local"
-	// for a local build.
+	// from and VW_BUILD_VERSION is its short commit hash, each shown on its own
+	// line, so a dev/PR build can be traced back to its exact branch and source
+	// revision at a glance. Both are "local" for a local build. The channel
+	// (dev/stable) is intentionally not shown here: the display name already
+	// carries "(Dev)" for dev builds.
 	//
 	// Shown as a modal dialog (the trailing false = NOT a minor alert) so the
 	// start-up confirmation is unmissable. A modal dialog displays both the main
@@ -88,6 +89,6 @@ void CSampleMenu_EventSink::DoInterface()
 	// the advice text entirely.)
 	gSDK->AlertInform(
 		PLUGIN_DISPLAY_NAME " plug-in started",
-		"channel: " VW_BUILD_CHANNEL " (" VW_BUILD_BRANCH ")   commit: " VW_BUILD_VERSION,
+		"branch: " VW_BUILD_BRANCH "\ncommit: " VW_BUILD_VERSION,
 		false /* not a minor alert: show a modal dialog */ );
 }
