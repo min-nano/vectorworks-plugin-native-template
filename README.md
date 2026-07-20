@@ -178,26 +178,30 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 
 ## 自動アップデート
 
-アップデートはコマンドラインではなく、**プラグイン自身がダイアログを出して**行います。
-更新の実処理（GitHub API の参照・ダウンロード・`Plug-Ins` へのインストール・隔離解除・
-アドホック再署名・ダイアログ表示）は `scripts/vw-update.sh` に集約されており、これは
-ビルド時に各バンドルの `Contents/Resources/vw-update.sh` に**同梱**されます。プラグイン
-（`src/Updater.cpp`）が適切なタイミングでこのスクリプトを起動するため、利用者が
-ターミナルを開く必要はありません。
+アップデートはコマンドラインではなく、**プラグイン自身がネイティブの Vectorworks
+ダイアログ**（`gSDK->AlertInform` / `gSDK->AlertQuestion`）を表示して行います
+（`src/Updater.cpp`）。ネットワーク・インストールなどの実処理（GitHub API の参照・
+ダウンロード・`Plug-Ins` へのインストール・隔離解除・アドホック再署名）は
+`scripts/vw-update.sh` に集約され、ビルド時に各バンドルの
+`Contents/Resources/vw-update.sh` に**同梱**されます。プラグインはこのスクリプトを
+**非対話モード**（`q-stable` / `q-dev` / `do-install`）で呼び出して結果を受け取り、
+ユーザーへの表示はすべて自前のネイティブダイアログで行うため、利用者がターミナルを
+開く必要はありません。
 
 チャンネルごとに挙動が異なります。
 
 - **stable（`SamplePlugin` / main）** — **Vectorworks 起動時**に、より新しい安定版
-  ビルドがないかをバックグラウンドで確認します（`src/ModuleMain.cpp` がモジュール
-  ロード時に一度だけ起動）。
+  ビルドがないかを確認します（`src/ModuleMain.cpp` がモジュールロード時に一度だけ実行）。
   - 既に最新なら**何も表示しません**（毎回の起動を邪魔しません）。
-  - 新しいビルドがあれば「インストールしますか？」ダイアログを表示し、選ばれた場合だけ
-    インストールします。
-  - 起動を止めないよう非同期（バックグラウンド）で実行し、ネットワークエラー時は静かに
-    諦めます。
+  - 新しいビルドがあれば `AlertQuestion` で「インストールしますか？」と尋ね、選ばれた
+    場合だけインストールします。
+  - ネットワーク確認は時間制限付き（`vw-update.sh` の `--max-time`）で、オフラインや
+    エラー時は静かに諦めます。
 
 - **dev（`SamplePluginDev` / ブランチ）** — **コマンド実行時**に、どのブランチの開発版
   ビルドを使うかを問い合わせます（`src/Extensions/ExtMenu.cpp` の `DoInterface`）。
+  ブランチ選択は `AlertQuestion` の複数ボタン（「これを使う／次の候補／キャンセル」）で
+  候補を順に提示します。
   - 選んだビルドが現在インストール済みのものと**異なればインストール**します。
   - **インストール済みと同じ**なら何もせず、そのままプラグインを実行します。
 
@@ -206,10 +210,12 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 解除とアドホック再署名はスクリプトが行います。
 
 リポジトリは公開なので、認証や追加ツールは不要です。スクリプトは macOS に標準で付属
-するもの（`curl`・`plutil`・`unzip`・`codesign`・`xattr`・`osascript`）だけを使います。
+するもの（`curl`・`plutil`・`unzip`・`codesign`・`xattr`・`osascript`）だけを使います
+（`osascript` は下記の手動 CLI パスのみで使用。プラグイン経由の更新はネイティブ
+ダイアログのみ）。
 
 プラグインを経由せず、スクリプトを直接実行することもできます（手動確認・トラブル
-シュート用）:
+シュート用。この CLI パスは従来どおり osascript ダイアログを使います）:
 
 ```sh
 # stable チャンネル（main → SamplePlugin）:
@@ -221,9 +227,10 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 # 引数なし（または Finder でダブルクリック）: 最初にチャンネルを尋ねます。
 ./scripts/vw-update.sh
 
-# プラグインが内部的に使うモード:
-./scripts/vw-update.sh startup-stable   # 起動時の stable 確認（最新なら無音）
-./scripts/vw-update.sh dev-pick         # dev のブランチ選択＋差分インストール
+# プラグインが内部的に使う非対話モード（ダイアログなし・機械可読出力）:
+./scripts/vw-update.sh q-stable                # stable の状態を表示
+./scripts/vw-update.sh q-dev                   # dev ビルド一覧を表示
+./scripts/vw-update.sh do-install <url> <name> # ダウンロードしてインストール
 ```
 
 環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）。

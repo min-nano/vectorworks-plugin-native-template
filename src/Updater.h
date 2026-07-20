@@ -1,28 +1,33 @@
 //
 //	Updater.h
 //
-//	Lets the plug-in drive its own updates by invoking the bundled vw-update.sh
-//	script (packaged into the .vwlibrary at build time), so the user never has to
-//	open a terminal. The script shows all of its own (macOS) dialogs.
+//	Drives the plug-in's self-update using NATIVE Vectorworks dialogs
+//	(gSDK->AlertInform / gSDK->AlertQuestion). The network + install mechanics
+//	are delegated to the vw-update.sh script bundled inside the .vwlibrary (it
+//	runs non-interactively and prints machine-readable output; see its q-stable
+//	/ q-dev / do-install modes), while every user-facing dialog is shown by the
+//	plug-in itself. So nobody has to open a terminal.
 //
 //	  * The STABLE plug-in checks for a newer build at Vectorworks start-up:
-//	    LaunchStableStartupCheck() (non-blocking; silent when already current).
+//	    RunStableStartupCheck() — silent when already current, otherwise asks
+//	    (native yes/no) whether to install.
 //	  * The DEV plug-in lets the user pick which branch's build to use each time
-//	    its command runs: RunDevBranchPicker() (blocks until the user is done).
+//	    its command runs: RunDevBranchPicker() — installs the chosen build only
+//	    if it differs from the one already installed.
 //
 
 #pragma once
 
 namespace SamplePlugin
 {
-	// Stable plug-in only. Launch the bundled updater in the BACKGROUND to check
-	// for a newer stable build and, if one exists, prompt to install it. Returns
-	// immediately so Vectorworks start-up is never blocked. Safe to call more
-	// than once per session — only the first call does anything.
-	void	LaunchStableStartupCheck();
+	// Stable plug-in only. At Vectorworks start-up, compare the installed stable
+	// build with the latest published one; if a newer one exists, ask (native
+	// dialog) whether to install it. Silent when already current or on a network
+	// error. Runs only once per session.
+	void	RunStableStartupCheck();
 
-	// Dev plug-in only. Run the bundled updater SYNCHRONOUSLY so the user can
-	// pick which branch's dev build to use; it installs the build only if it
-	// differs from the one already installed. Blocks until the picker is done.
+	// Dev plug-in only. Ask (native dialogs) which branch's dev build to use and
+	// install it, but only if it differs from the one already installed;
+	// otherwise nothing is installed and the plug-in just runs as loaded.
 	void	RunDevBranchPicker();
 }

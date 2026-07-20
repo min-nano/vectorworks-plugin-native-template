@@ -37,12 +37,13 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
 	::GS_InitializeVCOM( cbp );
 
 #ifndef VW_DEV_BUILD
-	// Stable plug-in: at Vectorworks start-up, kick off a background check for a
-	// newer stable build. It stays silent when already current and only prompts
-	// when an update is available. This runs when Vectorworks loads the module
-	// (which it does at start-up to build the workspace), and is guarded so it
-	// fires only once per session. Non-blocking, so it never delays start-up.
-	SamplePlugin::LaunchStableStartupCheck();
+	// Stable plug-in: at Vectorworks start-up, check for a newer stable build and,
+	// if one exists, ask (with a native Vectorworks dialog) whether to install it.
+	// Silent when already current or offline. This runs when Vectorworks loads the
+	// module (which it does at start-up to build the workspace) and is guarded so
+	// it fires only once per session. The network request is time-bounded (see
+	// vw-update.sh) so it can't hang start-up.
+	SamplePlugin::RunStableStartupCheck();
 #endif
 
 	Sint32	reply	= 0L;
