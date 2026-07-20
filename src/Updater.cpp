@@ -46,6 +46,36 @@ namespace
 		return contents + "Resources/vw-update.sh";
 	}
 
+	// Directory that CONTAINS this plug-in's .vwlibrary bundle — i.e. the exact
+	// Plug-Ins folder Vectorworks actually loaded this build from. Returns "" if
+	// it can't be resolved.
+	//
+	// This is what makes the updater install to the RIGHT place: the plug-in may
+	// live in a custom Vectorworks user folder (Vectorworks ▸ 環境設定 ▸ ユーザ
+	// フォルダ), not the default path. Installing next to the running bundle
+	// guarantees the update replaces the copy that is actually loaded, so the new
+	// build is picked up on the next restart. From
+	//   .../<PlugIns>/<name>.vwlibrary/Contents/MacOS/<name>
+	// we strip back to "<PlugIns>".
+	std::string BundlePluginsDir()
+	{
+		Dl_info info{};
+		if (::dladdr(reinterpret_cast<const void*>(&BundlePluginsDir), &info) == 0
+			|| info.dli_fname == nullptr)
+			return "";
+
+		std::string path = info.dli_fname;					// .../<PlugIns>/<name>.vwlibrary/Contents/MacOS/<name>
+		std::string::size_type at = path.rfind("/Contents/MacOS/");
+		if (at == std::string::npos)
+			return "";
+
+		std::string bundle = path.substr(0, at);			// .../<PlugIns>/<name>.vwlibrary
+		std::string::size_type slash = bundle.rfind('/');
+		if (slash == std::string::npos)
+			return "";
+		return bundle.substr(0, slash);						// .../<PlugIns>
+	}
+
 	// Wrap a string in single quotes so it is safe as one /bin/sh word, escaping
 	// any embedded single quotes (bundle paths and URLs can contain surprises).
 	std::string ShellQuote(const std::string& s)
@@ -68,7 +98,15 @@ namespace
 		if (script.empty())
 			return false;
 
-		std::string cmd = "/bin/bash " + ShellQuote(script) + " " + args + " 2>/dev/null";
+		// Point the script at the folder this build was actually loaded from, so
+		// it reads the installed commit from — and installs over — the copy
+		// Vectorworks really uses (not a guessed default path).
+		std::string env;
+		std::string pluginsDir = BundlePluginsDir();
+		if (!pluginsDir.empty())
+			env = "VW_PLUGINS_DIR=" + ShellQuote(pluginsDir) + " ";
+
+		std::string cmd = env + "/bin/bash " + ShellQuote(script) + " " + args + " 2>/dev/null";
 		FILE* pipe = ::popen(cmd.c_str(), "r");
 		if (pipe == nullptr)
 			return false;
