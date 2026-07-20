@@ -9,28 +9,28 @@
 
 #include "VectorworksSDK.h"
 
-namespace HelloVW
+namespace SamplePlugin
 {
 	using namespace VWFC::PluginSupport;
 
 	// ------------------------------------------------------------------------
 	// The code that actually runs when the menu command is picked.
-	class CHelloMenu_EventSink : public VWMenu_EventSink
+	class CSampleMenu_EventSink : public VWMenu_EventSink
 	{
 	public:
-						CHelloMenu_EventSink(IVWUnknown* parent);
-		virtual			~CHelloMenu_EventSink();
+						CSampleMenu_EventSink(IVWUnknown* parent);
+		virtual			~CSampleMenu_EventSink();
 
 		virtual void	DoInterface() override;
 	};
 
 	// ------------------------------------------------------------------------
 	// The menu command extension itself.
-	class CExtMenuHello : public VWExtensionMenu
+	class CExtMenuSample : public VWExtensionMenu
 	{
 		DEFINE_VWMenuExtension;
 	public:
-						CExtMenuHello(CallBackPtr cbp);
-		virtual			~CExtMenuHello();
+						CExtMenuSample(CallBackPtr cbp);
+		virtual			~CExtMenuSample();
 	};
 }

@@ -11,8 +11,9 @@
 #include "Extensions/ExtMenu.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
-// run time. Must match the base name of the packaged .vwr ("HelloVW.vwr" for
-// the stable build, "HelloVWDev.vwr" for the dev build). See BuildConfig.h.
+// run time. Must match the base name of the packaged .vwr ("SamplePlugin.vwr"
+// for the stable build, "SamplePluginDev.vwr" for the dev build). See
+// BuildConfig.h.
 const char* DefaultPluginVWRIdentifier() { return PLUGIN_VWR_ID; }
 
 //------------------------------------------------------------------
@@ -39,7 +40,7 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
 	using namespace VWFC::PluginSupport;
 
 	// Register our single menu command extension.
-	REGISTER_Extension<HelloVW::CExtMenuHello>(
+	REGISTER_Extension<SamplePlugin::CExtMenuSample>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply );
 
 	return reply;

@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
 #
-# HelloVW - a minimal Vectorworks 2026 SDK plug-in.
+# SamplePlugin - a minimal Vectorworks 2026 SDK plug-in template.
 #
-# The build produces a loadable macOS bundle named "HelloVW.vwlibrary" that
-# adds a single menu command. Running the command shows an alert dialog.
+# The build produces a loadable macOS bundle named "SamplePlugin.vwlibrary"
+# that adds a single menu command. Running the command shows an alert dialog.
+# Rename the identifiers below (target, output name, bundle id, menu category)
+# when you use this template for a real plug-in.
 #
 # Requirements:
 #   * macOS with the Xcode command line tools (Xcode 16.2 is the version
@@ -30,7 +32,7 @@ endif()
 
 # The SDK headers are compiled as Objective-C++ (some mac headers #import
 # CoreFoundation), matching how the SDK's own Xcode projects build.
-project(HelloVW LANGUAGES CXX OBJCXX)
+project(SamplePlugin LANGUAGES CXX OBJCXX)
 
 if(NOT APPLE)
 	message(FATAL_ERROR "This Vectorworks plug-in can only be built on macOS.")
@@ -170,5 +172,5 @@ endfunction()
 
 # Stable plug-in (from main) and dev plug-in (from feature/PR branches). Both
 # can be installed and loaded at the same time.
-add_vw_plugin(HelloVW    "HelloVW"    "net.homeskz.vectorworks.HelloVW"    "stable")
-add_vw_plugin(HelloVWDev "HelloVWDev" "net.homeskz.vectorworks.HelloVWDev" "dev" DEV)
+add_vw_plugin(SamplePlugin    "SamplePlugin"    "com.example.vectorworks.SamplePlugin"    "stable")
+add_vw_plugin(SamplePluginDev "SamplePluginDev" "com.example.vectorworks.SamplePluginDev" "dev" DEV)

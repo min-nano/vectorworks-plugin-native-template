@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# vw-update.sh — download the latest CI build of the HelloVW Vectorworks plug-in
+# vw-update.sh — download the latest CI build of the SamplePlugin Vectorworks plug-in
 # and install it into your Vectorworks 2026 Plug-Ins folder.
 #
 # Two channels, two separately-named plug-ins that can be installed at once:
 #
-#   stable  -> "HelloVW.vwlibrary"     from the rolling "stable" release (main).
-#   dev     -> "HelloVWDev.vwlibrary"  from a per-branch "dev-<branch>" prerelease;
+#   stable  -> "SamplePlugin.vwlibrary"     from the rolling "stable" release (main).
+#   dev     -> "SamplePluginDev.vwlibrary"  from a per-branch "dev-<branch>" prerelease;
 #              you pick which branch's build to install.
 #
 # Flow: check the latest build, tell you whether a newer one is available, then
@@ -29,7 +29,7 @@
 #
 set -euo pipefail
 
-VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
+VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-native-template}"
 VW_PLUGINS_DIR="${VW_PLUGINS_DIR:-$HOME/Library/Application Support/Vectorworks/2026/Plug-Ins}"
 VW_APP_NAME="${VW_APP_NAME:-}"
 VW_API="https://api.github.com/repos/${VW_REPO}"
@@ -56,7 +56,7 @@ APPLESCRIPT
 
 die() { # message
 	echo "error: $1" >&2
-	alert "HelloVW アップデート" "エラー: $1"
+	alert "SamplePlugin アップデート" "エラー: $1"
 	exit 1
 }
 
@@ -186,12 +186,12 @@ apply_choice() { # choice, zip, name
 	case "$choice" in
 		"更新だけ")
 			install_zip "$zip" "$name"
-			notify "HelloVW アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
+			notify "SamplePlugin アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
 			;;
 		"更新して再起動")
 			local app; app="$(find_vw_app)"
 			install_zip "$zip" "$name"
-			notify "HelloVW アップデート" "更新しました。Vectorworks を再起動します…"
+			notify "SamplePlugin アップデート" "更新しました。Vectorworks を再起動します…"
 			restart_vw "$app"
 			;;
 		*)
@@ -207,20 +207,20 @@ update_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(asset_url "$f" "assets" "HelloVW.vwlibrary.zip" || true)"
+	local url; url="$(asset_url "$f" "assets" "SamplePlugin.vwlibrary.zip" || true)"
 	rm -f "$f"
 	[ -n "$latest_full" ] || die "安定版リリースの情報を取得できませんでした。"
-	[ -n "$url" ] || die "安定版のアセット (HelloVW.vwlibrary.zip) が見つかりません。"
+	[ -n "$url" ] || die "安定版のアセット (SamplePlugin.vwlibrary.zip) が見つかりません。"
 
 	local latest="${latest_full:0:7}"
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HelloVW.vwlibrary")"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePlugin.vwlibrary")"
 
 	if [ "$installed" = "$latest" ]; then
-		alert "HelloVW (stable)" "既に最新です（build ${installed}）。"
+		alert "SamplePlugin (stable)" "既に最新です（build ${installed}）。"
 		return
 	fi
 
-	local choice; choice="$(ask3 "HelloVW (stable)" "新しい安定版ビルドがあります。
+	local choice; choice="$(ask3 "SamplePlugin (stable)" "新しい安定版ビルドがあります。
 インストール済み: ${installed}
 最新: ${latest}
 
@@ -228,8 +228,8 @@ update_stable() {
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	download "$url" "$tmp/HelloVW.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
-	apply_choice "$choice" "$tmp/HelloVW.vwlibrary.zip" "HelloVW"
+	download "$url" "$tmp/SamplePlugin.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
+	apply_choice "$choice" "$tmp/SamplePlugin.vwlibrary.zip" "SamplePlugin"
 	rm -rf "$tmp"
 }
 
@@ -247,7 +247,7 @@ update_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(asset_url "$f" "${i}.assets" "HelloVWDev.vwlibrary.zip" || true)"
+				url="$(asset_url "$f" "${i}.assets" "SamplePluginDev.vwlibrary.zip" || true)"
 				[ -n "$name" ] || name="$tag"
 				names+=("$name"); tags+=("$tag"); commits+=("$commit"); urls+=("$url")
 				;;
@@ -269,14 +269,14 @@ update_dev() {
 	[ "$idx" -ge 0 ] || die "選択したビルドを特定できませんでした。"
 
 	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
-	[ -n "$url2" ] || die "選択したビルドのアセット (HelloVWDev.vwlibrary.zip) が見つかりません。"
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HelloVWDev.vwlibrary")"
+	[ -n "$url2" ] || die "選択したビルドのアセット (SamplePluginDev.vwlibrary.zip) が見つかりません。"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePluginDev.vwlibrary")"
 
 	local same_note=""
 	[ "$installed" = "$latest" ] && same_note="（このビルドは既にインストール済みです）
 "
 
-	local choice; choice="$(ask3 "HelloVW (dev)" "${chosen_name}
+	local choice; choice="$(ask3 "SamplePlugin (dev)" "${chosen_name}
 ${same_note}インストール済み: ${installed}
 選択したビルド: ${latest}
 
@@ -284,8 +284,8 @@ ${same_note}インストール済み: ${installed}
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	download "$url2" "$tmp/HelloVWDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
-	apply_choice "$choice" "$tmp/HelloVWDev.vwlibrary.zip" "HelloVWDev"
+	download "$url2" "$tmp/SamplePluginDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
+	apply_choice "$choice" "$tmp/SamplePluginDev.vwlibrary.zip" "SamplePluginDev"
 	rm -rf "$tmp"
 }
 

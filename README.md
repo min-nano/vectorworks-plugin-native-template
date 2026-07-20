@@ -1,11 +1,18 @@
-# vectorworks-plugin-import-ifc-homeskz
+# vectorworks-plugin-native-template
 
-Vectorworks 2026 plug-in developed with the C++ SDK.
+A **template** for building a native Vectorworks 2026 plug-in with the C++ SDK.
 
-Right now this repository contains a **minimal, working plug-in** used to get the
-build environment and CI in place. The plug-in adds a single menu command that,
-when run, shows an alert dialog announcing that it started. Real functionality
-(IFC import) will be built on top of this foundation later.
+This repository is a ready-to-fork starting point: a **minimal, working plug-in**
+with the build system, CI, and release/update tooling already in place. The
+sample plug-in adds a single menu command that, when run, shows an alert dialog
+announcing that it started — replace it with your own extension and build real
+functionality on top of this foundation.
+
+> This project began as a specific plug-in (an IFC importer) and has since been
+> generalized into a reusable template. The sample identifiers below —
+> `SamplePlugin` / `SamplePluginDev`, bundle IDs `com.example.vectorworks.*`, and
+> the **Sample** menu category — are placeholders. Rename them (and the
+> `VW_REPO` default in `scripts/vw-update.sh`) when you start a real plug-in.
 
 ## Layout
 
@@ -18,8 +25,8 @@ src/
   PluginPrefix.h            Shared prefix header (pulls in the SDK)
   Module-Info.plist.in      Bundle Info.plist template (filled in per build)
 resources/
-  HelloVW.vwr/…             Menu strings for the stable plug-in
-  HelloVWDev.vwr/…          Menu strings for the dev plug-in
+  SamplePlugin.vwr/…             Menu strings for the stable plug-in
+  SamplePluginDev.vwr/…          Menu strings for the dev plug-in
 scripts/
   vw-update.sh              Download the latest CI build and install it
 .github/workflows/build.yml CI: builds on an Apple Silicon macOS runner
@@ -28,10 +35,10 @@ scripts/
 The same source builds **two coexisting plug-ins** from a single switch
 (`VW_DEV_BUILD`, see `src/BuildConfig.h`):
 
-- **`HelloVW.vwlibrary`** — the *stable* plug-in, built from `main`. Menu
-  category **HomesKZ**.
-- **`HelloVWDev.vwlibrary`** — the *dev* plug-in, built from feature/PR
-  branches. Menu category **HomesKZ (Dev)**.
+- **`SamplePlugin.vwlibrary`** — the *stable* plug-in, built from `main`. Menu
+  category **Sample**.
+- **`SamplePluginDev.vwlibrary`** — the *dev* plug-in, built from feature/PR
+  branches. Menu category **Sample (Dev)**.
 
 They have distinct bundle names, `.vwr` identifiers, VCOM universal names and
 extension UUIDs, so both can be installed and loaded at the same time — the
@@ -62,7 +69,7 @@ and the **Vectorworks 2026 mac SDK**.
    cmake --build build
    ```
 
-   The result is `build/HelloVW.vwlibrary`.
+   The result is `build/SamplePlugin.vwlibrary`.
 
 By default the build targets Apple Silicon (`arm64`). For a universal binary:
 
@@ -80,13 +87,13 @@ ID signing and no Vectorworks developer credentials). To install and run it:
    the download quarantine flag) and into your Vectorworks 2026 user folder's
    `Plug-Ins` directory (find it via Vectorworks ▸ Preferences ▸ *User Folders*).
    The `.vwr` resource is already inside the bundle, so just the
-   `HelloVW.vwlibrary` folder is needed.
+   `SamplePlugin.vwlibrary` folder is needed.
 
 2. **Clear the macOS quarantine flag** so Gatekeeper doesn't block the
    downloaded bundle:
 
    ```sh
-   xattr -dr com.apple.quarantine HelloVW.vwlibrary
+   xattr -dr com.apple.quarantine SamplePlugin.vwlibrary
    ```
 
    CI builds are already **ad-hoc code-signed** (required so Apple Silicon will
@@ -95,7 +102,7 @@ ID signing and no Vectorworks developer credentials). To install and run it:
    the bundle is "damaged", re-sign it yourself:
 
    ```sh
-   codesign --force --deep --sign - HelloVW.vwlibrary
+   codesign --force --deep --sign - SamplePlugin.vwlibrary
    ```
 
 3. **Launch Vectorworks.** Because the plug-in is unsigned, Vectorworks 2026
@@ -104,7 +111,7 @@ ID signing and no Vectorworks developer credentials). To install and run it:
    for internal, uncredentialed plug-ins and is fine for in-house use.
 
 4. **Add the command to your workspace:** Tools ▸ Workspaces ▸ Edit Current
-   Workspace ▸ *Menus*. Under the **HomesKZ** category you'll find the
+   Workspace ▸ *Menus*. Under the **Sample** category you'll find the
    **起動確認** command; drag it into a menu. Running it shows the alert.
 
 Getting Vectorworks developer credentials (the 2026 "satellite" file) is only
@@ -126,15 +133,15 @@ The workflow:
 - Downloads the SDK once and **caches** the (trimmed) SDK so the ~800 MB zip is
   not re-downloaded on later runs. Bump `VW_SDK_CACHE_KEY` in the workflow to
   force a fresh download.
-- Builds **both** `HelloVW.vwlibrary` and `HelloVWDev.vwlibrary`, stamps them
+- Builds **both** `SamplePlugin.vwlibrary` and `SamplePluginDev.vwlibrary`, stamps them
   with the commit (`-DVW_BUILD_VERSION`), ad-hoc-signs them, checks their
   architecture, and uploads them as build artifacts. For a pull request it
   builds the PR **head** commit (what you pushed), not the ephemeral merge
   commit.
 - **Publishes a downloadable release** so the updater has a stable URL to fetch:
-  - `main` refreshes the rolling **`stable`** release with `HelloVW.vwlibrary.zip`;
+  - `main` refreshes the rolling **`stable`** release with `SamplePlugin.vwlibrary.zip`;
   - a pull request refreshes its per-branch **`dev-<branch>`** prerelease with
-    `HelloVWDev.vwlibrary.zip` (skipped for fork PRs, whose token can't publish).
+    `SamplePluginDev.vwlibrary.zip` (skipped for fork PRs, whose token can't publish).
 
   Both are rolling — the tag is re-pointed at the newest build each time. The
   **stable** publish retries through an extended GitHub API outage (a missed
@@ -171,10 +178,10 @@ script uses only what ships with macOS (`curl`, `plutil`, `unzip`, `codesign`,
 `xattr`, `osascript`).
 
 ```sh
-# Stable channel (main → HelloVW):
+# Stable channel (main → SamplePlugin):
 ./scripts/vw-update.sh stable
 
-# Dev channel — pick which branch's build to install (→ HelloVWDev):
+# Dev channel — pick which branch's build to install (→ SamplePluginDev):
 ./scripts/vw-update.sh dev
 
 # No argument (or double-click in Finder): asks which channel first.
