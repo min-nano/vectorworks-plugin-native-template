@@ -1,12 +1,16 @@
 name: Build plug-in
 
 on:
+  # Only main builds on push — it is the protected default branch. Feature work
+  # always lives in a pull request, which is what builds those branches (and
+  # publishes their dev prerelease). This keeps a branch-with-an-open-PR from
+  # building twice (once for the push, once for the PR).
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
-# Needed so a push can publish/refresh the GitHub Release that the local
+# Needed so a build can publish/refresh the GitHub Release that the local
 # updater scripts download from.
 permissions:
   contents: write
@@ -27,8 +31,31 @@ jobs:
       VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
 
     steps:
+      # Resolve the commit/ref we are really building. For a pull_request event
+      # GITHUB_SHA is an ephemeral merge commit and GITHUB_REF_NAME is
+      # "<n>/merge", so use the PR head instead — that is the commit the
+      # developer pushed and the one the dev prerelease should point at.
+      - name: Resolve build context
+        id: ctx
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            sha="${{ github.event.pull_request.head.sha }}"
+            ref="${{ github.head_ref }}"
+          else
+            sha="${{ github.sha }}"
+            ref="${{ github.ref_name }}"
+          fi
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Build the resolved commit (PR head, or the pushed/ dispatched sha).
+          ref: ${{ steps.ctx.outputs.sha }}
 
       - name: Select Xcode 16.2
         uses: maxim-lobanov/setup-xcode@v1
@@ -92,11 +119,13 @@ jobs:
           echo "SDK looks good."
 
       - name: Configure
+        env:
+          VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
-            -DVW_BUILD_VERSION="${GITHUB_SHA:0:7}"
+            -DVW_BUILD_VERSION="$VW_BUILD_VERSION"
 
       - name: Build
         # Builds both the stable (HelloVW) and dev (HelloVWDev) bundles.
@@ -167,13 +196,15 @@ jobs:
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          SHORT: ${{ steps.ctx.outputs.short }}
         run: |
           set -euo pipefail
-          short="${GITHUB_SHA:0:7}"
+          short="$SHORT"
           cat > notes.txt <<EOF
           channel=stable
           branch=main
-          commit=${GITHUB_SHA}
+          commit=${BUILD_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
           # Delete + recreate as one unit. A missed stable release can go
@@ -185,7 +216,7 @@ jobs:
             gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
             gh release create stable "dist/HelloVW.vwlibrary.zip" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
+              --target "$BUILD_SHA" \
               --title "Stable (${short})" \
               --notes-file notes.txt \
               --latest
@@ -201,21 +232,26 @@ jobs:
           echo "::error::Failed to publish the stable release after $attempts attempts."
           exit 1
 
-      - name: Publish dev prerelease (feature/PR branches)
-        if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+      - name: Publish dev prerelease (pull requests)
+        # Feature branches are built via their pull request. Skip PRs from forks:
+        # their GITHUB_TOKEN is read-only and cannot publish a release.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          SHORT: ${{ steps.ctx.outputs.short }}
+          BRANCH: ${{ steps.ctx.outputs.ref }}
         run: |
           set -euo pipefail
-          short="${GITHUB_SHA:0:7}"
-          branch="$GITHUB_REF_NAME"
+          short="$SHORT"
+          branch="$BRANCH"
           # Sanitize the branch name into a tag-safe slug.
           slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
           tag="dev-${slug}"
           cat > notes.txt <<EOF
           channel=dev
           branch=${branch}
-          commit=${GITHUB_SHA}
+          commit=${BUILD_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
           # Dev builds are only used while actively working on a branch, so no
@@ -225,7 +261,7 @@ jobs:
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           gh release create "$tag" "dist/HelloVWDev.vwlibrary.zip" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
+            --target "$BUILD_SHA" \
             --title "Dev: ${branch} (${short})" \
             --notes-file notes.txt \
             --prerelease

@@ -113,7 +113,14 @@ or to run internally.
 
 ## Continuous integration
 
-`.github/workflows/build.yml` builds the plug-ins on every push:
+`.github/workflows/build.yml` builds the plug-ins. `main` is the protected
+default branch and feature work always lives in a pull request, so the triggers
+are split to avoid building a branch twice:
+
+- **push to `main`** (a merge) builds and publishes the **stable** release;
+- a **pull request** builds the branch and publishes its **dev** prerelease.
+
+The workflow:
 
 - Runs on `macos-15` (Apple Silicon) and selects Xcode 16.2.
 - Downloads the SDK once and **caches** the (trimmed) SDK so the ~800 MB zip is
@@ -121,12 +128,13 @@ or to run internally.
   force a fresh download.
 - Builds **both** `HelloVW.vwlibrary` and `HelloVWDev.vwlibrary`, stamps them
   with the commit (`-DVW_BUILD_VERSION`), ad-hoc-signs them, checks their
-  architecture, and uploads them as build artifacts.
+  architecture, and uploads them as build artifacts. For a pull request it
+  builds the PR **head** commit (what you pushed), not the ephemeral merge
+  commit.
 - **Publishes a downloadable release** so the updater has a stable URL to fetch:
-  - a push to **`main`** refreshes the rolling **`stable`** release with
-    `HelloVW.vwlibrary.zip`;
-  - a push to **any other branch** refreshes a per-branch **`dev-<branch>`**
-    prerelease with `HelloVWDev.vwlibrary.zip`.
+  - `main` refreshes the rolling **`stable`** release with `HelloVW.vwlibrary.zip`;
+  - a pull request refreshes its per-branch **`dev-<branch>`** prerelease with
+    `HelloVWDev.vwlibrary.zip` (skipped for fork PRs, whose token can't publish).
 
   Both are rolling — the tag is re-pointed at the newest build each time. The
   **stable** publish retries through an extended GitHub API outage (a missed
