@@ -80,13 +80,13 @@ void CSampleMenu_EventSink::DoInterface()
 	// local build; it is labelled "commit:" so a dev/PR build can be traced back
 	// to its exact source revision at a glance.
 	//
-	// AlertInform is called as a "minor alert" (the trailing true): Vectorworks
-	// shows minor alerts as a brief status-bar message rather than a modal
-	// dialog, and in that mode ONLY the first argument (the main text) is
-	// displayed — the second "advice" argument is dropped. So the channel and
-	// commit must live in the main text, not the advice, to be visible.
+	// Shown as a modal dialog (the trailing false = NOT a minor alert) so the
+	// start-up confirmation is unmissable. A modal dialog displays both the main
+	// text and the second "advice" argument, so the channel and commit go in the
+	// advice line. (A minor alert would render only in the status bar and drop
+	// the advice text entirely.)
 	gSDK->AlertInform(
-		PLUGIN_DISPLAY_NAME " plug-in started  (channel: " VW_BUILD_CHANNEL ", commit: " VW_BUILD_VERSION ")",
-		"" /* advice: not shown for a minor alert */,
-		true /* minor alert */ );
+		PLUGIN_DISPLAY_NAME " plug-in started",
+		"channel: " VW_BUILD_CHANNEL "   commit: " VW_BUILD_VERSION,
+		false /* not a minor alert: show a modal dialog */ );
 }
