@@ -1,194 +1,228 @@
 # vectorworks-plugin-native-template
 
-A **template** for building a native Vectorworks 2026 plug-in with the C++ SDK.
+C++ SDK でネイティブな Vectorworks 2026 プラグインを作るための**テンプレート**です。
 
-This repository is a ready-to-fork starting point: a **minimal, working plug-in**
-with the build system, CI, and release/update tooling already in place. The
-sample plug-in adds a single menu command that, when run, shows an alert dialog
-announcing that it started — replace it with your own extension and build real
-functionality on top of this foundation.
+フォークしてすぐ使える出発点として、ビルドシステム・CI・リリース／アップデート
+の仕組みまで揃った**最小構成の動くプラグイン**が入っています。サンプルのプラグ
+インはメニューコマンドを 1 つ追加するだけで、実行すると「起動した」ことを知らせる
+アラートダイアログを表示します。これを自分の拡張機能に置き換え、この土台の上に本来
+の機能を作り込んでいってください。
 
-> This project began as a specific plug-in (an IFC importer) and has since been
-> generalized into a reusable template. The sample identifiers below —
-> `SamplePlugin` / `SamplePluginDev`, bundle IDs `com.example.vectorworks.*`, and
-> the **Sample** menu category — are placeholders. Rename them (and the
-> `VW_REPO` default in `scripts/vw-update.sh`) when you start a real plug-in.
+> このプロジェクトは元々特定用途のプラグイン（IFC インポータ）として立ち上げられ、
+> その後、再利用可能なテンプレートへと一般化されました。以下に出てくるサンプルの
+> 識別子 — `SamplePlugin` / `SamplePluginDev`、バンドル ID `com.example.vectorworks.*`、
+> メニューカテゴリ **Sample** — はすべてプレースホルダーです。実際のプラグインを
+> 始めるときは、これらを（`scripts/vw-update.sh` の `VW_REPO` 既定値も含めて）
+> 自分の名前に置き換えてください。具体的な手順は
+> [テンプレートの使い方（改名手順）](#テンプレートの使い方改名手順)を参照してください。
 
-## Layout
+## 構成
 
 ```
-CMakeLists.txt              CMake build for the macOS plug-in bundles
+CMakeLists.txt              macOS プラグインバンドルの CMake ビルド
 src/
-  ModuleMain.cpp            Module entry point; registers the extension
-  Extensions/ExtMenu.{h,cpp}  The menu command that shows the alert
-  BuildConfig.h             Stable vs. dev identity switch (VW_DEV_BUILD)
-  PluginPrefix.h            Shared prefix header (pulls in the SDK)
-  Module-Info.plist.in      Bundle Info.plist template (filled in per build)
+  ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録する
+  Extensions/ExtMenu.{h,cpp}  アラートを表示するメニューコマンド
+  BuildConfig.h             stable / dev の識別切り替えスイッチ（VW_DEV_BUILD）
+  PluginPrefix.h            共有プレフィックスヘッダ（SDK を取り込む）
+  Module-Info.plist.in      バンドルの Info.plist テンプレート（ビルドごとに埋める）
 resources/
-  SamplePlugin.vwr/…             Menu strings for the stable plug-in
-  SamplePluginDev.vwr/…          Menu strings for the dev plug-in
+  SamplePlugin.vwr/…             stable プラグインのメニュー文字列
+  SamplePluginDev.vwr/…          dev プラグインのメニュー文字列
 scripts/
-  vw-update.sh              Download the latest CI build and install it
-.github/workflows/build.yml CI: builds on an Apple Silicon macOS runner
+  vw-update.sh              最新の CI ビルドをダウンロードしてインストールする
+.github/workflows/build.yml CI: Apple Silicon の macOS ランナーでビルドする
 ```
 
-The same source builds **two coexisting plug-ins** from a single switch
-(`VW_DEV_BUILD`, see `src/BuildConfig.h`):
+同じソースから、1 つのスイッチ（`VW_DEV_BUILD`、`src/BuildConfig.h` を参照）で
+**共存できる 2 つのプラグイン**をビルドします。
 
-- **`SamplePlugin.vwlibrary`** — the *stable* plug-in, built from `main`. Menu
-  category **Sample**.
-- **`SamplePluginDev.vwlibrary`** — the *dev* plug-in, built from feature/PR
-  branches. Menu category **Sample (Dev)**.
+- **`SamplePlugin.vwlibrary`** — *stable* プラグイン。`main` からビルドされます。
+  メニューカテゴリは **Sample**。
+- **`SamplePluginDev.vwlibrary`** — *dev* プラグイン。フィーチャー／PR ブランチから
+  ビルドされます。メニューカテゴリは **Sample (Dev)**。
 
-They have distinct bundle names, `.vwr` identifiers, VCOM universal names and
-extension UUIDs, so both can be installed and loaded at the same time — the
-stable build for normal use, the dev build for trying out an in-progress branch.
-Each bundle's menu command shows its channel and build commit in the alert, and
-that commit is also stamped into the bundle's `Info.plist`
-(`VWBuildChannel` / `VWBuildCommit`) so the updater can tell what's installed.
+バンドル名・`.vwr` 識別子・VCOM ユニバーサル名・拡張機能 UUID がそれぞれ別々なので、
+両方を同時にインストールしてロードできます — stable は通常利用に、dev は作業中の
+ブランチを試すために使えます。各バンドルのメニューコマンドは、アラート内に自分の
+チャンネルとビルドコミットを表示します。そのコミットはバンドルの `Info.plist`
+（`VWBuildChannel` / `VWBuildCommit`）にも刻まれるため、アップデータが何がインス
+トールされているかを判別できます。
 
-Each menu command's display text comes from its `resources/<name>.vwr` folder,
-which the SDK's `BuildVWR` tool packages into
-`<name>.vwlibrary/Contents/Resources/<name>.vwr` during the build, so each
-bundle is self-contained.
+各メニューコマンドの表示テキストは、それぞれの `resources/<name>.vwr` フォルダから
+来ます。ビルド時に SDK の `BuildVWR` ツールがこれを
+`<name>.vwlibrary/Contents/Resources/<name>.vwr` にパッケージするので、各バンドルは
+自己完結しています。
 
-## Building locally
+## テンプレートの使い方（改名手順）
 
-You need macOS with Xcode (Vectorworks 2026 officially targets **Xcode 16.2**)
-and the **Vectorworks 2026 mac SDK**.
+このテンプレートを実際のプラグインに使うときは、プレースホルダーの識別子を自分の
+ものに置き換えます。下表の左側を右側（例）に置換していってください。
 
-1. Download and unzip the SDK:
+| 対象 | プレースホルダー | 置換する場所 |
+| --- | --- | --- |
+| バンドル／出力名（stable） | `SamplePlugin` | `CMakeLists.txt`（`project()`・`add_vw_plugin`）、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`.github/workflows/build.yml`、本 README |
+| バンドル／出力名（dev） | `SamplePluginDev` | 同上 |
+| バンドル ID | `com.example.vectorworks.SamplePlugin(Dev)` | `CMakeLists.txt` の `add_vw_plugin` 第 3 引数 |
+| メニューカテゴリ | `Sample` / `Sample (Dev)` | `resources/*/Strings/*.vwstrings` の `category` |
+| C++ 名前空間 | `SamplePlugin` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
+| C++ クラス | `CExtMenuSample` / `CSampleMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}` |
+| VCOM ユニバーサル名 | `CExtMenuSample_SamplePlugin(Dev)` | `src/BuildConfig.h` |
+| リポジトリ | `min-nano/vectorworks-plugin-native-template` | `scripts/vw-update.sh` の `VW_REPO` 既定値 |
+| 表示名・ヘルプ文言 | 「起動確認」など | `resources/*/Strings/*.vwstrings` |
+
+多くはテキストの一括置換で済みます（`SamplePluginDev` を先に置換してから
+`SamplePlugin` を置換すると安全です）。ただし次の 2 点は手作業が必要です。
+
+- **拡張機能 UUID は必ず新しく生成してください。** `src/Extensions/ExtMenu.cpp` に
+  stable / dev それぞれ 1 つずつ UUID があります。UUID はプラグインごとに世界で一意
+  でなければならず、コピーしたまま使うと他のプラグインと衝突します。macOS で
+  `uuidgen` を実行して 2 つ生成し、`IMPLEMENT_VWMenuExtension` の該当行を置き換え、
+  コメントの UUID 文字列も合わせて更新してください。
+
+- **`.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。** バイナリ扱いのエディタや
+  エンコーディングを保持できるツールで編集してください。エンコーディングが崩れると
+  `BuildVWR` がメニュー文字列を正しく読めなくなります。
+
+置換後は、旧識別子が残っていないか一括検索で確認しておくと安全です。
+
+```sh
+grep -rniE "sampleplugin|com\.example|CExtMenuSample|CSampleMenu" \
+  --exclude-dir=.git .
+```
+
+## ローカルでのビルド
+
+macOS と Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）、および
+**Vectorworks 2026 mac SDK** が必要です。
+
+1. SDK をダウンロードして展開します:
    <https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip>
-   (~800 MB). After unzipping you get a folder containing `SDKLib/`.
+   （約 800 MB）。展開すると `SDKLib/` を含むフォルダができます。
 
-2. Configure and build, pointing `VW_SDK_DIR` at the folder that contains
-   `SDKLib`:
+2. `VW_SDK_DIR` を `SDKLib` を含むフォルダに向けて、コンフィグとビルドを行います:
 
    ```sh
    cmake -S . -B build -DVW_SDK_DIR=/path/to/2026-NNA-eng-mac-SDK
    cmake --build build
    ```
 
-   The result is `build/SamplePlugin.vwlibrary`.
+   成果物は `build/SamplePlugin.vwlibrary` です。
 
-By default the build targets Apple Silicon (`arm64`). For a universal binary:
+既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
 
 ```sh
 cmake -S . -B build -DVW_SDK_DIR=/path/to/sdk \
   -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 ```
 
-## Installing and running (internal / unsigned use)
+## インストールと実行（社内 / 未署名での利用）
 
-This plug-in is for internal use and is shipped **unsigned** (no Apple Developer
-ID signing and no Vectorworks developer credentials). To install and run it:
+このプラグインは社内利用向けで、**未署名**（Apple Developer ID 署名なし、
+Vectorworks 開発者クレデンシャルなし）で配布されます。インストールして実行するには:
 
-1. **Put the bundle on a local disk** (not iCloud Drive — iCloud can re-apply
-   the download quarantine flag) and into your Vectorworks 2026 user folder's
-   `Plug-Ins` directory (find it via Vectorworks ▸ Preferences ▸ *User Folders*).
-   The `.vwr` resource is already inside the bundle, so just the
-   `SamplePlugin.vwlibrary` folder is needed.
+1. **バンドルをローカルディスクに置きます**（iCloud Drive は不可 — iCloud が
+   ダウンロード隔離フラグを付け直すことがあります）。置き場所は Vectorworks 2026
+   のユーザフォルダ内の `Plug-Ins` ディレクトリです（Vectorworks ▸ 環境設定 ▸
+   *ユーザフォルダ* から探せます）。`.vwr` リソースはバンドル内に含まれているので、
+   `SamplePlugin.vwlibrary` フォルダだけで十分です。
 
-2. **Clear the macOS quarantine flag** so Gatekeeper doesn't block the
-   downloaded bundle:
+2. Gatekeeper がダウンロードしたバンドルをブロックしないよう、**macOS の隔離フラグを
+   解除します**:
 
    ```sh
    xattr -dr com.apple.quarantine SamplePlugin.vwlibrary
    ```
 
-   CI builds are already **ad-hoc code-signed** (required so Apple Silicon will
-   load the binary at all — this is free and is not Developer ID signing). If
-   you built locally the linker ad-hoc-signs automatically. If macOS still says
-   the bundle is "damaged", re-sign it yourself:
+   CI ビルドは既に **アドホック署名済み**です（Apple Silicon がバイナリをロードする
+   ために必須。無料であり、Developer ID 署名ではありません）。ローカルビルドの場合は
+   リンカが自動でアドホック署名します。それでも macOS が「壊れている」と言う場合は、
+   自分で署名し直してください:
 
    ```sh
    codesign --force --deep --sign - SamplePlugin.vwlibrary
    ```
 
-3. **Launch Vectorworks.** Because the plug-in is unsigned, Vectorworks 2026
-   shows an "unknown/unsigned plug-in" warning at startup and may disable it by
-   default. Acknowledge the warning and enable the plug-in — this is expected
-   for internal, uncredentialed plug-ins and is fine for in-house use.
+3. **Vectorworks を起動します。** プラグインが未署名のため、Vectorworks 2026 は起動時
+   に「不明／未署名のプラグイン」警告を表示し、既定で無効化することがあります。警告を
+   了解してプラグインを有効化してください — これは社内向け・クレデンシャルなしの
+   プラグインでは想定どおりの挙動で、社内利用では問題ありません。
 
-4. **Add the command to your workspace:** Tools ▸ Workspaces ▸ Edit Current
-   Workspace ▸ *Menus*. Under the **Sample** category you'll find the
-   **起動確認** command; drag it into a menu. Running it shows the alert.
+4. **コマンドをワークスペースに追加します:** ツール ▸ ワークスペース ▸ 現在の
+   ワークスペースを編集 ▸ *メニュー*。**Sample** カテゴリの中に **起動確認** コマンド
+   があるので、メニューにドラッグしてください。実行するとアラートが表示されます。
 
-Getting Vectorworks developer credentials (the 2026 "satellite" file) is only
-needed to ship a *signed* plug-in with no warning; it is not required to build
-or to run internally.
+Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファイル）は、警告の出ない
+*署名済み*プラグインを配布する場合にのみ必要で、ビルドや社内での実行には不要です。
 
-## Continuous integration
+## 継続的インテグレーション（CI）
 
-`.github/workflows/build.yml` builds the plug-ins. `main` is the protected
-default branch and feature work always lives in a pull request, so the triggers
-are split to avoid building a branch twice:
+`.github/workflows/build.yml` がプラグインをビルドします。`main` は保護された
+デフォルトブランチで、機能開発は必ず PR 上で行うため、ブランチを二重にビルドしない
+ようトリガを分けています。
 
-- **push to `main`** (a merge) builds and publishes the **stable** release;
-- a **pull request** builds the branch and publishes its **dev** prerelease.
+- **`main` への push**（マージ）は **stable** リリースをビルドして公開します。
+- **PR** はそのブランチをビルドして **dev** プレリリースを公開します。
 
-The workflow:
+ワークフローの内容:
 
-- Runs on `macos-15` (Apple Silicon) and selects Xcode 16.2.
-- Downloads the SDK once and **caches** the (trimmed) SDK so the ~800 MB zip is
-  not re-downloaded on later runs. Bump `VW_SDK_CACHE_KEY` in the workflow to
-  force a fresh download.
-- Builds **both** `SamplePlugin.vwlibrary` and `SamplePluginDev.vwlibrary`, stamps them
-  with the commit (`-DVW_BUILD_VERSION`), ad-hoc-signs them, checks their
-  architecture, and uploads them as build artifacts. For a pull request it
-  builds the PR **head** commit (what you pushed), not the ephemeral merge
-  commit.
-- **Publishes a downloadable release** so the updater has a stable URL to fetch:
-  - `main` refreshes the rolling **`stable`** release with `SamplePlugin.vwlibrary.zip`;
-  - a pull request refreshes its per-branch **`dev-<branch>`** prerelease with
-    `SamplePluginDev.vwlibrary.zip` (skipped for fork PRs, whose token can't publish).
+- `macos-15`（Apple Silicon）で実行し、Xcode 16.2 を選択します。
+- SDK は一度だけダウンロードし、（トリミングした）SDK を**キャッシュ**するので、
+  約 800 MB の zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードする
+  にはワークフロー内の `VW_SDK_CACHE_KEY` を変更します。
+- `SamplePlugin.vwlibrary` と `SamplePluginDev.vwlibrary` の**両方**をビルドし、コミット
+  で刻印（`-DVW_BUILD_VERSION`）してアドホック署名し、アーキテクチャを確認して、ビルド
+  成果物としてアップロードします。PR ではエフェメラルなマージコミットではなく、PR の
+  **head** コミット（あなたが push したもの）をビルドします。
+- **ダウンロード可能なリリースを公開**し、アップデータが取得できる安定した URL を用意
+  します:
+  - `main` はローリングな **`stable`** リリースを `SamplePlugin.vwlibrary.zip` で更新
+    します。
+  - PR はブランチごとの **`dev-<branch>`** プレリリースを `SamplePluginDev.vwlibrary.zip`
+    で更新します（トークンで公開できないフォーク PR ではスキップされます）。
 
-  Both are rolling — the tag is re-pointed at the newest build each time. The
-  **stable** publish retries through an extended GitHub API outage (a missed
-  stable release could otherwise go unnoticed); the **dev** publish does not
-  retry — dev builds are only used while working on a branch, so just re-run the
-  job if a transient error hits it.
+  どちらもローリング方式で、毎回タグを最新ビルドに貼り直します。**stable** の公開は
+  GitHub API の長時間障害があってもリトライします（stable リリースの取りこぼしは
+  気づかれにくいため）。**dev** の公開はリトライしません — dev ビルドはブランチ作業中
+  にしか使わないので、一時的なエラーが出たらジョブを再実行すれば十分です。
 
-`.github/workflows/cleanup-dev-release.yml` deletes a branch's `dev-<branch>`
-prerelease (and its tag) when that branch is deleted, so dev builds don't pile
-up. Because it is triggered by the `delete` event, it runs from the copy on the
-default branch and therefore only cleans up branches deleted after it lands on
-`main`.
+`.github/workflows/cleanup-dev-release.yml` は、ブランチが削除されたときにその
+`dev-<branch>` プレリリース（とタグ）を削除し、dev ビルドが溜まらないようにします。
+`delete` イベントで起動されるため、デフォルトブランチ上のコピーから実行され、この
+ワークフローが `main` に入った後に削除されたブランチだけを対象とします。
 
-`.github/workflows/stable-release-healthcheck.yml` runs on a schedule (every 6
-hours) as a safety net: if the published `stable` release has drifted from the
-tip of `main` — i.e. a stable publish was missed — it re-dispatches `build.yml`
-on `main` to rebuild and republish. Like all scheduled/`delete` workflows it
-runs from the default branch, so it is active once merged to `main`.
+`.github/workflows/stable-release-healthcheck.yml` はスケジュール（6 時間ごと）で
+安全網として実行されます。公開済みの `stable` リリースが `main` の先頭からずれている
+場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
+して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
+デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
 
-## Auto-update (自動アップデート)
+## 自動アップデート
 
-`scripts/vw-update.sh` downloads the latest CI build and installs it into your
-Vectorworks 2026 `Plug-Ins` folder, so you can verify a new build without
-manually downloading, de-quarantining and copying it.
+`scripts/vw-update.sh` は最新の CI ビルドをダウンロードして Vectorworks 2026 の
+`Plug-Ins` フォルダにインストールします。手動でのダウンロード・隔離解除・コピーを
+せずに、新しいビルドを確認できます。
 
-It checks the latest build, tells you whether a newer one is available, then
-lets you choose **更新しない / 更新だけ / 更新して再起動** (skip / update only /
-update and restart Vectorworks). It de-quarantines and ad-hoc re-signs the
-bundle for you, and "更新して再起動" quits and relaunches Vectorworks so the new
-build actually loads (compiled plug-ins are only read at startup).
+最新ビルドを確認して、より新しいものがあるかを知らせたうえで、**更新しない /
+更新だけ / 更新して再起動** を選ばせます。バンドルの隔離解除とアドホック再署名は
+スクリプトが行い、「更新して再起動」では Vectorworks を終了して再起動します（コンパイル
+済みプラグインは起動時にしか読み込まれないため、新しいビルドを実際にロードするには
+再起動が必要です）。
 
-The repository is public, so no authentication or extra tooling is needed — the
-script uses only what ships with macOS (`curl`, `plutil`, `unzip`, `codesign`,
-`xattr`, `osascript`).
+リポジトリは公開なので、認証や追加ツールは不要です。スクリプトは macOS に標準で付属
+するもの（`curl`・`plutil`・`unzip`・`codesign`・`xattr`・`osascript`）だけを使います。
 
 ```sh
-# Stable channel (main → SamplePlugin):
+# stable チャンネル（main → SamplePlugin）:
 ./scripts/vw-update.sh stable
 
-# Dev channel — pick which branch's build to install (→ SamplePluginDev):
+# dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ SamplePluginDev）:
 ./scripts/vw-update.sh dev
 
-# No argument (or double-click in Finder): asks which channel first.
+# 引数なし（または Finder でダブルクリック）: 最初にチャンネルを尋ねます。
 ./scripts/vw-update.sh
 ```
 
-Overridable via environment: `VW_REPO` (owner/repo), `VW_PLUGINS_DIR` (install
-location), `VW_APP_NAME` (app to restart). The two channels install
-separately-named bundles, so the stable and dev plug-ins never overwrite each
-other.
+環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）、
+`VW_APP_NAME`（再起動するアプリ）。2 つのチャンネルは別名のバンドルをインストールする
+ので、stable と dev のプラグインが互いを上書きすることはありません。
