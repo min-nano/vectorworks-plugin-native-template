@@ -75,9 +75,18 @@ void CSampleMenu_EventSink::DoInterface()
 {
 	// This is the whole point of the plug-in for now: tell the user it ran,
 	// and show exactly which build is loaded so a freshly-installed update can
-	// be verified at a glance.
+	// be verified at a glance. VW_BUILD_VERSION is the short git commit hash of
+	// the build (e.g. the PR head commit for a dev build), or "local" for a
+	// local build; it is labelled "commit:" so a dev/PR build can be traced back
+	// to its exact source revision at a glance.
+	//
+	// AlertInform is called as a "minor alert" (the trailing true): Vectorworks
+	// shows minor alerts as a brief status-bar message rather than a modal
+	// dialog, and in that mode ONLY the first argument (the main text) is
+	// displayed — the second "advice" argument is dropped. So the channel and
+	// commit must live in the main text, not the advice, to be visible.
 	gSDK->AlertInform(
-		PLUGIN_DISPLAY_NAME " plug-in started",
-		"channel: " VW_BUILD_CHANNEL "   build: " VW_BUILD_VERSION,
+		PLUGIN_DISPLAY_NAME " plug-in started  (channel: " VW_BUILD_CHANNEL ", commit: " VW_BUILD_VERSION ")",
+		"" /* advice: not shown for a minor alert */,
 		true /* minor alert */ );
 }
