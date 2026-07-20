@@ -10,8 +10,8 @@
 #              you pick which branch's build to install.
 #
 # Flow: check the latest build, tell you whether a newer one is available, then
-# let you choose: 更新しない / 更新だけ / 更新して再起動 (skip / update only /
-# update and restart Vectorworks).
+# let you choose: 更新しない / 更新だけ (skip / update only). The new build is
+# loaded the next time you (re)start Vectorworks yourself.
 #
 # Usage:
 #   ./scripts/vw-update.sh            # ask which channel (or double-click)
@@ -25,13 +25,11 @@
 # Overridable via environment:
 #   VW_REPO         owner/repo             (default below)
 #   VW_PLUGINS_DIR  Vectorworks Plug-Ins   (default: user folder for VW 2026)
-#   VW_APP_NAME     app to restart         (default: auto-detect / "Vectorworks 2026")
 #
 set -euo pipefail
 
 VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-native-template}"
 VW_PLUGINS_DIR="${VW_PLUGINS_DIR:-$HOME/Library/Application Support/Vectorworks/2026/Plug-Ins}"
-VW_APP_NAME="${VW_APP_NAME:-}"
 VW_API="https://api.github.com/repos/${VW_REPO}"
 
 # ---------------------------------------------------------------------------
@@ -60,12 +58,12 @@ die() { # message
 	exit 1
 }
 
-# ask3: show the three-way choice. Echoes the chosen button; cancel -> skip.
-ask3() { # title, message
+# ask2: show the two-way choice. Echoes the chosen button; cancel -> skip.
+ask2() { # title, message
 	osascript - "$1" "$2" <<'APPLESCRIPT' 2>/dev/null || echo "更新しない"
 on run argv
 	try
-		set r to button returned of (display dialog (item 2 of argv) with title (item 1 of argv) buttons {"更新しない", "更新だけ", "更新して再起動"} default button "更新して再起動" cancel button "更新しない")
+		set r to button returned of (display dialog (item 2 of argv) with title (item 1 of argv) buttons {"更新しない", "更新だけ"} default button "更新だけ" cancel button "更新しない")
 		return r
 	on error number -128
 		return "更新しない"
@@ -163,36 +161,13 @@ install_zip() { # zip, name
 	echo "installed: $dst"
 }
 
-find_vw_app() { # echo the name of a running Vectorworks app, or ""
-	osascript -e 'tell application "System Events" to get name of (first application process whose name starts with "Vectorworks")' 2>/dev/null || echo ""
-}
-
-restart_vw() { # app-name (may be empty)
-	local app="$1"
-	[ -n "$app" ] || app="${VW_APP_NAME:-Vectorworks 2026}"
-	osascript -e "tell application \"$app\" to quit" >/dev/null 2>&1 || true
-	local i=0
-	while [ "$i" -lt 40 ]; do
-		pgrep -x "$app" >/dev/null 2>&1 || break
-		sleep 1
-		i=$((i + 1))
-	done
-	open -a "$app" >/dev/null 2>&1 || die "Vectorworks ($app) を再起動できませんでした。手動で起動してください。"
-}
-
-# apply_choice: run the chosen action (skip / update only / update+restart).
+# apply_choice: run the chosen action (skip / update only).
 apply_choice() { # choice, zip, name
 	local choice="$1" zip="$2" name="$3"
 	case "$choice" in
 		"更新だけ")
 			install_zip "$zip" "$name"
 			notify "SamplePlugin アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
-			;;
-		"更新して再起動")
-			local app; app="$(find_vw_app)"
-			install_zip "$zip" "$name"
-			notify "SamplePlugin アップデート" "更新しました。Vectorworks を再起動します…"
-			restart_vw "$app"
 			;;
 		*)
 			echo "skipped."
@@ -220,7 +195,7 @@ update_stable() {
 		return
 	fi
 
-	local choice; choice="$(ask3 "SamplePlugin (stable)" "新しい安定版ビルドがあります。
+	local choice; choice="$(ask2 "SamplePlugin (stable)" "新しい安定版ビルドがあります。
 インストール済み: ${installed}
 最新: ${latest}
 
@@ -276,7 +251,7 @@ update_dev() {
 	[ "$installed" = "$latest" ] && same_note="（このビルドは既にインストール済みです）
 "
 
-	local choice; choice="$(ask3 "SamplePlugin (dev)" "${chosen_name}
+	local choice; choice="$(ask2 "SamplePlugin (dev)" "${chosen_name}
 ${same_note}インストール済み: ${installed}
 選択したビルド: ${latest}
 
