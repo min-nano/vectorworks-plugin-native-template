@@ -26,8 +26,10 @@ namespace SamplePlugin
 	// error. Runs only once per session.
 	void	RunStableStartupCheck();
 
-	// Dev plug-in only. Ask (native dialogs) which branch's dev build to use and
-	// install it, but only if it differs from the one already installed;
-	// otherwise nothing is installed and the plug-in just runs as loaded.
-	void	RunDevBranchPicker();
+	// Dev plug-in only. Ask (native dialogs) which build to use: the currently
+	// installed one, or another branch's prerelease. Returns true if the plug-in
+	// should now run its normal command (the user kept the installed build);
+	// returns false if it should stop instead — either a different build was just
+	// installed (you will want to restart to load it) or the user cancelled.
+	bool	RunDevBranchPicker();
 }

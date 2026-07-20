@@ -75,13 +75,14 @@ CSampleMenu_EventSink::~CSampleMenu_EventSink()
 void CSampleMenu_EventSink::DoInterface()
 {
 #ifdef VW_DEV_BUILD
-	// Dev plug-in: before running, let the user choose which branch's dev build
-	// to use. The bundled updater installs it only if it differs from the one
-	// already installed; if it matches, nothing happens and we just run as
-	// loaded. A freshly installed build is picked up on the next Vectorworks
-	// launch (a compiled plug-in can only be swapped in at start-up), so the
-	// alert below still reports the build that is currently loaded.
-	SamplePlugin::RunDevBranchPicker();
+	// Dev plug-in: before running, let the user choose which build to use — keep
+	// the installed one, or switch to another branch's prerelease. If they switch
+	// (a new build is installed) or cancel, stop here: a compiled plug-in can only
+	// be swapped in at start-up, and while developing you normally want to restart
+	// right away rather than run the still-loaded old build. Only when the user
+	// keeps the installed build do we fall through and run the command.
+	if (!SamplePlugin::RunDevBranchPicker())
+		return;
 #endif
 
 	// This is the whole point of the plug-in for now: tell the user it ran,

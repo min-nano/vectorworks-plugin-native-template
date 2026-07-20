@@ -9,6 +9,7 @@
 //
 
 #include "PluginPrefix.h"
+#include "BuildConfig.h"
 #include "Updater.h"
 
 #include <dlfcn.h>
@@ -276,75 +277,86 @@ namespace SamplePlugin
 			Inform("更新に失敗しました。", err);
 	}
 
-	void RunDevBranchPicker()
+	// Let the user pick which prerelease build to switch to. Pages through the
+	// candidates (already filtered to exclude the running build). Installs the
+	// chosen one. Returns false in every case (a switch always ends the command
+	// so the user can restart to load it — or they cancelled).
+	bool ChooseAndInstallOther(const std::vector<DevBuild>& others)
 	{
-		std::string out;
-		if (!RunScript("q-dev", out))
-		{
-			Inform("開発版の情報を取得できませんでした。", "");
-			return;
-		}
-		std::string err = ValueOf(out, "error");
-		if (!err.empty())
-		{
-			Inform("開発版の情報を取得できませんでした。", err);
-			return;
-		}
-
-		std::string installed = ValueOf(out, "installed");
-		std::vector<DevBuild> builds = ParseDevBuilds(out);
-		if (builds.empty())
-		{
-			Inform("開発版ビルド (dev-*) がまだありません。",
-				   "対象ブランチを push して CI ビルドを走らせてください。");
-			return;
-		}
-
-		// Native branch picker. AlertQuestion offers up to three buttons, so we
-		// present the builds one at a time: "これを使う" selects the current one,
-		// "次の候補" moves on, "キャンセル" aborts. The last build drops the
-		// "次の候補" button. Works natively for any number of branches.
-		int selected = -1;
-		const int count = static_cast<int>(builds.size());
+		const int count = static_cast<int>(others.size());
 		for (int i = 0; i < count; ++i)
 		{
 			const bool last = (i + 1 == count);
-			std::string advice = "commit: " + builds[i].commit
+			std::string advice = "commit: " + others[i].commit
 				+ "  (" + std::to_string(i + 1) + "/" + std::to_string(count) + ")";
-			if (builds[i].commit == installed)
-				advice += "\n（現在インストール済み）";
-
-			std::string text = "使用する開発版ビルド:\n" + builds[i].name;
 			short r = gSDK->AlertQuestion(
-				text.c_str(), advice.c_str(),
+				("インストールするビルドを選択:\n" + others[i].name).c_str(),
+				advice.c_str(),
 				/*defaultButton*/ 1,
-				/*OK*/     "これを使う",
+				/*OK*/     "これをインストール",
 				/*Cancel*/ "キャンセル",
 				/*A*/      last ? "" : "次の候補",
 				/*B*/      "");
 
-			if (r == 1) { selected = i; break; }	// これを使う
-			if (r == 0) return;						// キャンセル
+			if (r == 0) return false;				// キャンセル
+			if (r == 1)								// これをインストール
+			{
+				std::string err;
+				if (Install(others[i].url, "SamplePluginDev", err))
+					Inform("開発版ビルドをインストールしました。",
+						   "反映するには Vectorworks を再起動してください。\n"
+						   "branch: " + others[i].name + "\ncommit: " + others[i].commit);
+				else
+					Inform("インストールに失敗しました。", err);
+				return false;						// installed -> end the command (restart to load)
+			}
 			// r == 2 -> 次の候補 -> continue
 		}
-		if (selected < 0)
-			return;
+		return false;
+	}
 
-		const DevBuild& pick = builds[selected];
-
-		// Already the installed build -> nothing to do; the plug-in just runs.
-		if (pick.commit == installed)
+	bool RunDevBranchPicker()
+	{
+		std::string out;
+		if (!RunScript("q-dev", out) || !ValueOf(out, "error").empty())
 		{
-			Inform("選択したビルドは既にインストール済みです。",
-				   "commit: " + pick.commit);
-			return;
+			// Offline / transient: don't block the user — just run the current
+			// build (the command's original behaviour).
+			return true;
 		}
 
-		std::string ierr;
-		if (Install(pick.url, "SamplePluginDev", ierr))
-			Inform("開発版ビルドをインストールしました。",
-				   "反映するには Vectorworks を再起動してください。\ncommit: " + pick.commit);
-		else
-			Inform("インストールに失敗しました。", ierr);
+		std::vector<DevBuild> all = ParseDevBuilds(out);
+
+		// The build that is actually loaded and running right now. Compiled in,
+		// so it is unambiguous even if a different build is staged on disk.
+		const std::string runningBranch = VW_BUILD_BRANCH;
+		const std::string runningCommit = VW_BUILD_VERSION;
+
+		// Candidates to switch TO: every prerelease except the running build.
+		std::vector<DevBuild> others;
+		for (const DevBuild& b : all)
+			if (b.commit != runningCommit)
+				others.push_back(b);
+
+		// Entry dialog: show the running (installed) build; offer to run it, or
+		// switch to another branch when other prereleases exist.
+		const bool hasOthers = !others.empty();
+		std::string advice = "現在: " + runningBranch + " (" + runningCommit + ")  ← インストール済み";
+		advice += hasOthers
+			? "\n\n他のブランチのビルドに切り替えられます。"
+			: "\n\n切り替え可能な他のブランチのビルドはありません。";
+
+		short r = gSDK->AlertQuestion(
+			"使用する開発版ビルドを選択",
+			advice.c_str(),
+			/*defaultButton*/ 1,
+			/*OK*/     "現在のビルドを実行",
+			/*Cancel*/ "キャンセル",
+			/*A*/      hasOthers ? "別のブランチ…" : "",
+			/*B*/      "");
+
+		if (r == 1) return true;					// 現在のビルドを実行 -> run
+		if (r == 2) return ChooseAndInstallOther(others);	// 別のブランチ… -> switch
+		return false;								// キャンセル -> do nothing
 	}
 }
