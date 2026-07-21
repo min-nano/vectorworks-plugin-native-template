@@ -257,6 +257,19 @@ jobs:
           commit=${BUILD_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
+          # Guard against a delete/publish race. The branch may have been
+          # deleted after the PR was opened but before this (slow) build
+          # finished. If so, cleanup-dev-release.yml has already run and found
+          # no prerelease to delete (this job had not published one yet), so
+          # creating one now would orphan it forever. Skip publishing when the
+          # branch no longer exists.
+          branch_exists() {
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1
+          }
+          if ! branch_exists; then
+            echo "Branch '$branch' no longer exists; skipping dev prerelease publish to avoid orphaning it."
+            exit 0
+          fi
           # Dev builds are only used while actively working on a branch, so no
           # retry: if a transient GitHub API error fails this, just re-run the
           # job manually. (The stable release, which could go unnoticed, does
@@ -268,3 +281,10 @@ jobs:
             --title "Dev: ${branch} (${short})" \
             --notes-file notes.txt \
             --prerelease
+          # Close the narrow window where the branch is deleted between the
+          # check above and now: if cleanup ran during publish, it may have
+          # missed the release. Re-check and clean up our own release if so.
+          if ! branch_exists; then
+            echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          fi
