@@ -23,7 +23,9 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_ver() { return SDK_VERSION; }
 
 //------------------------------------------------------------------
 // Module entry point.
-// More info: http://developer.vectorworks.net/index.php?title=SDK:Module_Plug-in
+// More info: https://github.com/Vectorworks/developer-sdk/blob/main/Info/Plug-in%20Module.md
+// (The old developer.vectorworks.net wiki has been retired; the SDK docs now
+// live in the Vectorworks/developer-sdk repository — see README "SDK ドキュメント".)
 //
 extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
 	Sint32			action,
