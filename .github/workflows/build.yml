@@ -57,6 +57,23 @@ jobs:
           # Build the resolved commit (PR head, or the pushed/ dispatched sha).
           ref: ${{ steps.ctx.outputs.sha }}
 
+      # TEST-ONLY (do not merge): emulate the race this branch verifies. Delete
+      # this PR's head branch right after checkout, so by the time the (much
+      # later) "Publish dev prerelease" step runs, the branch is gone — exactly
+      # the situation where a branch is deleted before the build finishes. The
+      # already-checked-out code keeps building; only the publish guard should
+      # react by skipping. Runs only on the throwaway race-test branch.
+      - name: (TEST) Simulate branch deleted mid-build
+        if: github.event_name == 'pull_request' && github.head_ref == 'claude/prerelease-race-test'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "Deleting head branch '$BRANCH' to emulate a branch removed before build completes."
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH"
+          echo "Branch deleted. Continuing the build from the checked-out commit."
+
       - name: Select Xcode 16.2
         uses: maxim-lobanov/setup-xcode@v1
         with:
