@@ -11,9 +11,13 @@
 //	  * The STABLE plug-in checks for a newer build at Vectorworks start-up:
 //	    RunStableStartupCheck() — silent when already current, otherwise asks
 //	    (native yes/no) whether to install.
-//	  * The DEV plug-in lets the user pick which branch's build to use each time
-//	    its command runs: RunDevBranchPicker() — installs the chosen build only
-//	    if it differs from the one already installed.
+//	  * The DEV plug-in lets the user pick which branch's build to use, also at
+//	    Vectorworks start-up: RunDevStartupCheck() — installs the chosen build
+//	    only if it differs from the one already installed. Doing this at start-up
+//	    (rather than each time the command runs) matters because a plug-in may
+//	    re-invoke its own command programmatically, and the build in use can only
+//	    change at start-up anyway — so the picker belongs where the build is
+//	    actually loaded, not on every command run.
 //
 
 #pragma once
@@ -26,10 +30,10 @@ namespace SamplePlugin
 	// error. Runs only once per session.
 	void	RunStableStartupCheck();
 
-	// Dev plug-in only. Ask (native dialogs) which build to use: the currently
-	// installed one, or another branch's prerelease. Returns true if the plug-in
-	// should now run its normal command (the user kept the installed build);
-	// returns false if it should stop instead — either a different build was just
-	// installed (you will want to restart to load it) or the user cancelled.
-	bool	RunDevBranchPicker();
+	// Dev plug-in only. At Vectorworks start-up, ask (native dialogs) which build
+	// to use: the currently installed one, or another branch's prerelease. If a
+	// different build is chosen it is installed (restart to load it); otherwise
+	// nothing happens and start-up continues. Silent on a network error. Runs
+	// only once per session.
+	void	RunDevStartupCheck();
 }
