@@ -190,6 +190,71 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------
+	// Native pull-down list dialog (VWFC::VWUI) for choosing a build.
+	//
+	// A single modal dialog with one drop-down listing every choice at once:
+	// entry 0 is the currently installed build, the rest are other branches'
+	// prereleases. The selected 0-based index is delivered via DDX into
+	// fSelection. All signatures follow the Vectorworks 2026 SDK headers
+	// (VWFC/VWUI/{Dialog,PullDownMenuCtrl,StaticTextCtrl}.h); the control classes
+	// and the event-map macros come in via PluginPrefix.h -> VectorworksSDK.h.
+	// -----------------------------------------------------------------------
+	class CBuildPickerDialog : public VWDialog
+	{
+	public:
+		CBuildPickerDialog(const std::vector<TXString>& items, short initialSel)
+			: fPrompt(kPromptID), fPopup(kPopupID), fItems(items), fSelection(initialSel) {}
+		virtual ~CBuildPickerDialog() {}
+
+		short	GetSelection() const { return fSelection; }
+
+	protected:
+		// Build the dialog and its controls (called by RunDialogLayout).
+		virtual bool CreateDialogLayout() override
+		{
+			// hasHelp = false -> a plain OK / Cancel dialog, no help button.
+			if (! this->CreateDialog("使用する開発版ビルドを選択", "OK", "キャンセル", false))
+				return false;
+			if (! fPrompt.CreateControl(this, "使用するビルドを選択してください:"))
+				return false;
+			if (! fPopup.CreateControl(this, 52 /* width in standard chars */))
+				return false;
+			this->AddFirstGroupControl(& fPrompt);
+			this->AddBelowControl(& fPrompt, & fPopup);
+			return true;
+		}
+
+		// Fill the drop-down and preselect the initial item (control now exists).
+		virtual void OnInitializeContent() override
+		{
+			VWDialog::OnInitializeContent();
+			for (const TXString& item : fItems)
+				fPopup.AddItem(item);
+			if (fSelection >= 0 && size_t(fSelection) < fItems.size())
+				fPopup.SelectIndex(size_t(fSelection));
+		}
+
+		// Bind the drop-down's selected index to fSelection (both directions).
+		virtual void OnDDXInitialize() override
+		{
+			this->AddDDX_PulldownMenu(kPopupID, & fSelection);
+		}
+
+		// Required by VWDialog even with no per-control event handlers.
+		DEFINE_EVENT_DISPATH_MAP;
+
+	private:
+		enum { kPromptID = 3, kPopupID = 4 };	// 1 = OK, 2 = Cancel are reserved.
+		VWStaticTextCtrl		fPrompt;
+		VWPullDownMenuCtrl		fPopup;
+		std::vector<TXString>	fItems;
+		short					fSelection;
+	};
+
+	EVENT_DISPATCH_MAP_BEGIN(CBuildPickerDialog);
+	EVENT_DISPATCH_MAP_END;
+
+	// -----------------------------------------------------------------------
 	// Native dialog wrappers.
 	// -----------------------------------------------------------------------
 
@@ -277,44 +342,6 @@ namespace SamplePlugin
 			Inform("更新に失敗しました。", err);
 	}
 
-	// Let the user pick which prerelease build to switch to. Pages through the
-	// candidates (already filtered to exclude the running build). Installs the
-	// chosen one. Returns false in every case (a switch always ends the command
-	// so the user can restart to load it — or they cancelled).
-	bool ChooseAndInstallOther(const std::vector<DevBuild>& others)
-	{
-		const int count = static_cast<int>(others.size());
-		for (int i = 0; i < count; ++i)
-		{
-			const bool last = (i + 1 == count);
-			std::string advice = "commit: " + others[i].commit
-				+ "  (" + std::to_string(i + 1) + "/" + std::to_string(count) + ")";
-			short r = gSDK->AlertQuestion(
-				("インストールするビルドを選択:\n" + others[i].name).c_str(),
-				advice.c_str(),
-				/*defaultButton*/ 1,
-				/*OK*/     "これをインストール",
-				/*Cancel*/ "キャンセル",
-				/*A*/      last ? "" : "次の候補",
-				/*B*/      "");
-
-			if (r == 0) return false;				// キャンセル
-			if (r == 1)								// これをインストール
-			{
-				std::string err;
-				if (Install(others[i].url, "SamplePluginDev", err))
-					Inform("開発版ビルドをインストールしました。",
-						   "反映するには Vectorworks を再起動してください。\n"
-						   "branch: " + others[i].name + "\ncommit: " + others[i].commit);
-				else
-					Inform("インストールに失敗しました。", err);
-				return false;						// installed -> end the command (restart to load)
-			}
-			// r == 2 -> 次の候補 -> continue
-		}
-		return false;
-	}
-
 	bool RunDevBranchPicker()
 	{
 		std::string out;
@@ -338,25 +365,40 @@ namespace SamplePlugin
 			if (b.commit != runningCommit)
 				others.push_back(b);
 
-		// Entry dialog: show the running (installed) build; offer to run it, or
-		// switch to another branch when other prereleases exist.
-		const bool hasOthers = !others.empty();
-		std::string advice = "現在: " + runningBranch + " (" + runningCommit + ")  ← インストール済み";
-		advice += hasOthers
-			? "\n\n他のブランチのビルドに切り替えられます。"
-			: "\n\n切り替え可能な他のブランチのビルドはありません。";
+		// One drop-down listing everything: entry 0 is the installed build,
+		// entries 1.. are the other branches' prereleases.
+		std::vector<TXString> items;
+		{
+			std::string cur = "現在: " + runningBranch + " (" + runningCommit + ") ― インストール済み";
+			items.push_back(TXString(cur.c_str()));
+		}
+		for (const DevBuild& b : others)
+		{
+			std::string line = b.name + "  (" + b.commit + ")";
+			items.push_back(TXString(line.c_str()));
+		}
 
-		short r = gSDK->AlertQuestion(
-			"使用する開発版ビルドを選択",
-			advice.c_str(),
-			/*defaultButton*/ 1,
-			/*OK*/     "現在のビルドを実行",
-			/*Cancel*/ "キャンセル",
-			/*A*/      hasOthers ? "別のブランチ…" : "",
-			/*B*/      "");
+		CBuildPickerDialog dlg(items, /*initialSel*/ 0);
+		if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
+			return false;						// cancelled -> do nothing, don't run
 
-		if (r == 1) return true;					// 現在のビルドを実行 -> run
-		if (r == 2) return ChooseAndInstallOther(others);	// 別のブランチ… -> switch
-		return false;								// キャンセル -> do nothing
+		short sel = dlg.GetSelection();
+		if (sel <= 0)
+			return true;						// kept the installed build -> run it
+
+		size_t idx = size_t(sel) - 1;			// map back to the "others" list
+		if (idx >= others.size())
+			return true;						// out of range safeguard -> run current
+		const DevBuild& pick = others[idx];
+
+		// A different build was chosen: install it and stop (restart to load).
+		std::string err;
+		if (Install(pick.url, "SamplePluginDev", err))
+			Inform("開発版ビルドをインストールしました。",
+				   "反映するには Vectorworks を再起動してください。\n"
+				   "branch: " + pick.name + "\ncommit: " + pick.commit);
+		else
+			Inform("インストールに失敗しました。", err);
+		return false;							// switched build -> finish (don't run)
 	}
 }
