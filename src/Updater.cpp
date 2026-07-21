@@ -342,14 +342,21 @@ namespace SamplePlugin
 			Inform("更新に失敗しました。", err);
 	}
 
-	bool RunDevBranchPicker()
+	void RunDevStartupCheck()
 	{
+		// plugin_module_main can be called more than once per session; only offer
+		// the picker the first time (mirrors RunStableStartupCheck).
+		static bool sDone = false;
+		if (sDone)
+			return;
+		sDone = true;
+
 		std::string out;
 		if (!RunScript("q-dev", out) || !ValueOf(out, "error").empty())
 		{
-			// Offline / transient: don't block the user — just run the current
-			// build (the command's original behaviour).
-			return true;
+			// Offline / transient: don't block start-up — just carry on with the
+			// currently loaded build.
+			return;
 		}
 
 		std::vector<DevBuild> all = ParseDevBuilds(out);
@@ -380,18 +387,18 @@ namespace SamplePlugin
 
 		CBuildPickerDialog dlg(items, /*initialSel*/ 0);
 		if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
-			return false;						// cancelled -> do nothing, don't run
+			return;								// cancelled -> keep the loaded build
 
 		short sel = dlg.GetSelection();
 		if (sel <= 0)
-			return true;						// kept the installed build -> run it
+			return;								// kept the installed build
 
 		size_t idx = size_t(sel) - 1;			// map back to the "others" list
 		if (idx >= others.size())
-			return true;						// out of range safeguard -> run current
+			return;								// out of range safeguard -> keep current
 		const DevBuild& pick = others[idx];
 
-		// A different build was chosen: install it and stop (restart to load).
+		// A different build was chosen: install it (restart to load).
 		std::string err;
 		if (Install(pick.url, "SamplePluginDev", err))
 			Inform("開発版ビルドをインストールしました。",
@@ -399,6 +406,5 @@ namespace SamplePlugin
 				   "branch: " + pick.name + "\ncommit: " + pick.commit);
 		else
 			Inform("インストールに失敗しました。", err);
-		return false;							// switched build -> finish (don't run)
 	}
 }

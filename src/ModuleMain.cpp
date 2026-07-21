@@ -38,14 +38,23 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
 	// Initialize the VCOM (Vectorworks Component Object Model) mechanism.
 	::GS_InitializeVCOM( cbp );
 
+	// At Vectorworks start-up, offer to change the build in use. This runs when
+	// Vectorworks loads the module (which it does at start-up to build the
+	// workspace) and each check is guarded so it fires only once per session. The
+	// network request is time-bounded (see vw-update.sh) so it can't hang start-up.
+	// Start-up is the right place because a compiled plug-in can only be swapped in
+	// at load time, and because a plug-in may re-invoke its own command
+	// programmatically — so the check must not live on the command path.
 #ifndef VW_DEV_BUILD
-	// Stable plug-in: at Vectorworks start-up, check for a newer stable build and,
-	// if one exists, ask (with a native Vectorworks dialog) whether to install it.
-	// Silent when already current or offline. This runs when Vectorworks loads the
-	// module (which it does at start-up to build the workspace) and is guarded so
-	// it fires only once per session. The network request is time-bounded (see
-	// vw-update.sh) so it can't hang start-up.
+	// Stable plug-in: check for a newer stable build and, if one exists, ask (with
+	// a native Vectorworks dialog) whether to install it. Silent when already
+	// current or offline.
 	SamplePlugin::RunStableStartupCheck();
+#else
+	// Dev plug-in: let the user pick which branch's build to use — keep the
+	// installed one, or switch to another branch's prerelease (installed on
+	// choosing, then restart to load). Silent on a network error.
+	SamplePlugin::RunDevStartupCheck();
 #endif
 
 	Sint32	reply	= 0L;
