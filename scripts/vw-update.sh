@@ -13,10 +13,31 @@
 # let you choose: 更新しない / 更新だけ (skip / update only). The new build is
 # loaded the next time you (re)start Vectorworks yourself.
 #
+# The plug-in itself drives its own updates by invoking this same script (it is
+# bundled inside the .vwlibrary, see src/Updater.cpp). The plug-in shows all of
+# its own NATIVE Vectorworks dialogs (AlertInform / AlertQuestion), so this
+# script exposes a small NON-INTERACTIVE, machine-readable back end for it — no
+# dialogs of its own in those modes:
+#
+#   q-stable            Print the stable channel status as key=value lines:
+#                       installed=<commit|none> / latest=<commit> / url=<zip url>
+#                       (or error=<message>).
+#   q-dev               Print installed=<commit|none> then one TSV line per dev
+#                       build: "build<TAB>commit<TAB>name<TAB>url"
+#                       (or error=<message>).
+#   do-install <url> <name>   Download+install <name>.vwlibrary; print "ok" or
+#                             error=<message>. No dialogs.
+#
+# The interactive stable/dev modes below are the manual, run-from-a-terminal
+# fallback and keep using macOS (osascript) dialogs.
+#
 # Usage:
 #   ./scripts/vw-update.sh            # ask which channel (or double-click)
 #   ./scripts/vw-update.sh stable
 #   ./scripts/vw-update.sh dev
+#   ./scripts/vw-update.sh q-stable                 # (used by the plug-in)
+#   ./scripts/vw-update.sh q-dev                    # (used by the plug-in)
+#   ./scripts/vw-update.sh do-install <url> <name>  # (used by the plug-in)
 #
 # Requirements: macOS only. Uses tools that ship with macOS (curl, plutil,
 # unzip, codesign, xattr, osascript) — no Homebrew, no `gh`, and because the
@@ -90,8 +111,10 @@ APPLESCRIPT
 # plutil, which ships with macOS and reads JSON natively.
 # ---------------------------------------------------------------------------
 api_get() { # api-subpath -> path to a temp file holding the JSON, or fail
+	# --max-time bounds the request so the plug-in's start-up check can never
+	# hang Vectorworks on a slow/unreachable network.
 	local f; f="$(mktemp)"
-	if curl -fsSL -H "Accept: application/vnd.github+json" "${VW_API}/$1" -o "$f"; then
+	if curl -fsSL --max-time 20 --retry 2 -H "Accept: application/vnd.github+json" "${VW_API}/$1" -o "$f"; then
 		printf '%s' "$f"
 	else
 		rm -f "$f"; return 1
@@ -265,6 +288,97 @@ ${same_note}インストール済み: ${installed}
 }
 
 # ---------------------------------------------------------------------------
+# Non-interactive, machine-readable back end for the plug-in. These print
+# simple key=value / TSV lines to stdout and NEVER show a dialog — the plug-in
+# parses them and shows its own native Vectorworks dialogs. Transient failures
+# are reported as an "error=<message>" line (exit 0), so the plug-in stays in
+# control of what (if anything) the user sees.
+# ---------------------------------------------------------------------------
+
+# q-stable: stable channel status.
+#   installed=<commit|none>
+#   latest=<commit>
+#   url=<zip download url>
+q_stable() {
+	local f; f="$(api_get "releases/tags/stable")" \
+		|| { echo "error=stable リリースを取得できませんでした。"; return 0; }
+	local latest_full; latest_full="$(jval "$f" target_commitish)"
+	local url; url="$(asset_url "$f" "assets" "SamplePlugin.vwlibrary.zip" || true)"
+	rm -f "$f"
+	if [ -z "$latest_full" ] || [ -z "$url" ]; then
+		echo "error=stable リリースの情報が不完全です。"; return 0
+	fi
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePlugin.vwlibrary")"
+	echo "installed=${installed}"
+	echo "latest=${latest_full:0:7}"
+	echo "url=${url}"
+}
+
+# q-dev: installed dev commit, then one line per downloadable dev build.
+#   installed=<commit|none>
+#   build<TAB>commit<TAB>name<TAB>url
+q_dev() {
+	local f; f="$(api_get "releases?per_page=100")" \
+		|| { echo "error=リリース一覧を取得できませんでした。"; return 0; }
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePluginDev.vwlibrary")"
+	echo "installed=${installed}"
+
+	local i=0 tag name commit url
+	while [ "$i" -lt 100 ]; do
+		tag="$(jval "$f" "${i}.tag_name")"
+		[ -n "$tag" ] || break
+		case "$tag" in
+			dev-*)
+				name="$(jval "$f" "${i}.name")"
+				commit="$(jval "$f" "${i}.target_commitish")"
+				url="$(asset_url "$f" "${i}.assets" "SamplePluginDev.vwlibrary.zip" || true)"
+				[ -n "$name" ] || name="$tag"
+				# Only list builds that actually have a downloadable asset.
+				[ -n "$url" ] && printf 'build\t%s\t%s\t%s\n' "${commit:0:7}" "$name" "$url"
+				;;
+		esac
+		i=$((i + 1))
+	done
+	rm -f "$f"
+}
+
+# do-install <url> <name>: download and install "<name>.vwlibrary". Prints "ok"
+# or "error=<message>". Self-contained (does not use install_zip's die(), which
+# would show an osascript dialog) so the plug-in owns all UI.
+do_install() {
+	local url="$1" name="$2"
+	[ -n "$url" ] && [ -n "$name" ] || { echo "error=引数が不足しています。"; return 0; }
+
+	local tmp work; tmp="$(mktemp -d)"; work="$(mktemp -d)"
+	if ! download "$url" "$tmp/$name.vwlibrary.zip"; then
+		rm -rf "$tmp" "$work"; echo "error=ダウンロードに失敗しました。"; return 0
+	fi
+	if ! unzip -q "$tmp/$name.vwlibrary.zip" -d "$work" >/dev/null 2>&1; then
+		rm -rf "$tmp" "$work"; echo "error=アーカイブの展開に失敗しました。"; return 0
+	fi
+	local src="$work/$name.vwlibrary"
+	if [ ! -d "$src" ]; then
+		rm -rf "$tmp" "$work"; echo "error=$name.vwlibrary が zip 内に見つかりません。"; return 0
+	fi
+
+	# Gatekeeper: clear the download quarantine flag, then re-apply an ad-hoc
+	# signature so Apple Silicon will load it even after unzip.
+	xattr -dr com.apple.quarantine "$src" 2>/dev/null || true
+	codesign --force --deep --sign - "$src" >/dev/null 2>&1 || true
+
+	mkdir -p "$VW_PLUGINS_DIR"
+	local dst="$VW_PLUGINS_DIR/$name.vwlibrary"
+	rm -rf "$dst.new"
+	if ! cp -R "$src" "$dst.new"; then
+		rm -rf "$tmp" "$work" "$dst.new"; echo "error=インストール先へのコピーに失敗しました。"; return 0
+	fi
+	rm -rf "$dst"
+	mv "$dst.new" "$dst"
+	rm -rf "$tmp" "$work"
+	echo "ok"
+}
+
+# ---------------------------------------------------------------------------
 main() {
 	command -v curl >/dev/null 2>&1 || die "curl が見つかりません（macOS で実行してください）。"
 
@@ -279,9 +393,12 @@ main() {
 	fi
 
 	case "$channel" in
-		stable) update_stable ;;
-		dev)    update_dev ;;
-		*)      die "不明なチャンネル: '$channel'（stable か dev を指定してください）。" ;;
+		stable)     update_stable ;;
+		dev)        update_dev ;;
+		q-stable)   q_stable ;;
+		q-dev)      q_dev ;;
+		do-install) do_install "${2:-}" "${3:-}" ;;
+		*)      die "不明なチャンネル: '$channel'（stable / dev / q-stable / q-dev / do-install）。" ;;
 	esac
 }
 

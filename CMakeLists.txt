@@ -88,6 +88,7 @@ endif()
 set(VW_COMMON_SOURCES
 	src/ModuleMain.cpp
 	src/Extensions/ExtMenu.cpp
+	src/Updater.cpp
 )
 
 # add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
@@ -178,6 +179,18 @@ function(add_vw_plugin target output_name bundle_id channel)
 			VERBATIM
 			COMMENT "Packaging ${output_name}.vwr resource into the bundle")
 	endif()
+
+	# Bundle the updater script so the installed plug-in can drive its own
+	# updates without a terminal (see src/Updater.cpp). It is read at run time
+	# from Contents/Resources/vw-update.sh inside the bundle.
+	add_custom_command(TARGET ${target} POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E make_directory
+			"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources"
+		COMMAND "${CMAKE_COMMAND}" -E copy
+			"${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.sh"
+			"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-update.sh"
+		VERBATIM
+		COMMENT "Bundling vw-update.sh into ${output_name}")
 endfunction()
 
 # Stable plug-in (from main) and dev plug-in (from feature/PR branches). Both
