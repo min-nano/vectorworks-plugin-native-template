@@ -70,6 +70,11 @@ jobs:
           BRANCH: ${{ github.head_ref }}
         run: |
           set -euo pipefail
+          # Clean up the orphan dev release left by the first race build (it was
+          # published while the branch still existed). Deleting it here from a
+          # runner is the only permitted write path in this test environment.
+          gh release delete dev-claude-prerelease-race-test \
+            --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           echo "Deleting head branch '$BRANCH' to emulate a branch removed before build completes."
           gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH"
           echo "Branch deleted. Continuing the build from the checked-out commit."
