@@ -1,10 +1,16 @@
 name: Coverage
 
-# Build and run the SDK-free unit tests (src/UpdaterParse.h), measure code
-# coverage, and publish it to GitHub Code Quality. Because the tests do NOT need
-# the Vectorworks SDK, this runs on a plain Linux runner — no ~800 MB SDK
-# download — so it is fast and works on pull requests from forks too (upload is
-# then skipped, see below).
+# Two jobs, split so a failure points straight at its cause:
+#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them.
+#                A red X here means a TEST failed.
+#   * coverage — only after `test` passes: rebuild with gcov instrumentation,
+#                produce a Cobertura report, and publish it to GitHub Code
+#                Quality. A red X here means REPORT GENERATION/UPLOAD failed,
+#                not a test.
+#
+# Because the tests do NOT need the Vectorworks SDK, both jobs run on a plain
+# Linux runner — no ~800 MB SDK download — so they are fast and work on pull
+# requests from forks too (the Code Quality upload is then skipped, see below).
 
 on:
   push:
@@ -12,21 +18,54 @@ on:
   pull_request:
   workflow_dispatch:
 
-# actions/upload-code-coverage needs code-quality:write to publish the report;
-# pull-requests:read lets it associate coverage with the PR.
-permissions:
-  contents: read
-  code-quality: write
-  pull-requests: read
-
 # One coverage run per ref; a new push cancels an in-flight run for that ref.
 concurrency:
   group: coverage-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  coverage:
+  test:
     runs-on: ubuntu-latest
+    # Building/running the tests needs nothing beyond reading the repo.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++
+
+      # Tests only (VW_BUILD_PLUGIN=OFF), no coverage instrumentation, so this
+      # job's result reflects the tests alone. No SDK required.
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON
+
+      - name: Build tests
+        run: cmake --build build -v
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    # Runs only if `test` succeeded, so a coverage-job failure is unambiguously
+    # about the report (gcovr / upload), never a failing test.
+    needs: test
+    runs-on: ubuntu-latest
+    # actions/upload-code-coverage needs code-quality:write to publish the
+    # report; pull-requests:read lets it associate coverage with the PR.
+    permissions:
+      contents: read
+      code-quality: write
+      pull-requests: read
 
     steps:
       - name: Checkout
@@ -38,8 +77,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake g++ gcovr
 
-      # Tests only (VW_BUILD_PLUGIN=OFF), instrumented for gcov. No SDK required.
-      - name: Configure
+      # Same tests, this time instrumented for gcov so running them emits
+      # coverage data.
+      - name: Configure (with coverage)
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
@@ -50,7 +90,9 @@ jobs:
       - name: Build tests
         run: cmake --build build -v
 
-      - name: Run tests
+      # `test` already gated pass/fail; here we just need the run to emit .gcda
+      # coverage data next to the objects.
+      - name: Run tests (produce coverage data)
         run: ctest --test-dir build --output-on-failure
 
       # Emit a Cobertura XML report over the plug-in sources under src/. The
