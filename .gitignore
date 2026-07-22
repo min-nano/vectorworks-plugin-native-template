@@ -1,6 +1,7 @@
 # Build output
 /build/
 /build-tests/
+/buildcov/
 /dist/
 *.vwlibrary
 *.vlb

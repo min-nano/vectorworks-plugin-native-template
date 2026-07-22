@@ -153,6 +153,7 @@ set(VW_COMMON_SOURCES
 	src/ModuleMain.cpp
 	src/Extensions/ExtMenu.cpp
 	src/Updater.cpp
+	src/UpdaterFlow.cpp
 )
 
 # add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])

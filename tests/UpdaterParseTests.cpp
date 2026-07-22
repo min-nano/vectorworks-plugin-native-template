@@ -289,6 +289,14 @@ TEST(mac_plugins_dir_from_binary_bundle_at_root)
 	CHECK_EQ(MacPluginsDirFromBinary(bin), "");
 }
 
+TEST(mac_plugins_dir_from_binary_no_leading_slash_is_empty)
+{
+	// The marker is present but nothing precedes the bundle name (no separator
+	// before it), so there is no containing directory to return.
+	const std::string bin = "X.vwlibrary/Contents/MacOS/X";
+	CHECK_EQ(MacPluginsDirFromBinary(bin), "");
+}
+
 // ---------------------------------------------------------------------------
 // WinModuleDirFromPath
 // ---------------------------------------------------------------------------
@@ -324,6 +332,167 @@ TEST(win_script_path_from_dir_appends_script)
 TEST(win_script_path_from_dir_empty_is_empty)
 {
 	CHECK_EQ(WinScriptPathFromDir(""), "");
+}
+
+// ---------------------------------------------------------------------------
+// EvaluateStable — the stable-channel "is there an update?" decision.
+// ---------------------------------------------------------------------------
+
+TEST(evaluate_stable_offers_when_newer)
+{
+	const std::string out =
+		"installed=abc1234\n"
+		"latest=def5678\n"
+		"url=https://ex.com/SamplePlugin.vwlibrary.zip\n";
+	StableStatus s = EvaluateStable(out);
+	CHECK(s.offerUpdate);
+	CHECK_EQ(s.installed, "abc1234");
+	CHECK_EQ(s.latest, "def5678");
+	CHECK_EQ(s.url, "https://ex.com/SamplePlugin.vwlibrary.zip");
+}
+
+TEST(evaluate_stable_silent_when_already_current)
+{
+	const std::string out =
+		"installed=def5678\n"
+		"latest=def5678\n"
+		"url=https://ex.com/x.zip\n";
+	StableStatus s = EvaluateStable(out);
+	CHECK(!s.offerUpdate);
+	// Fields are still populated even though no update is offered.
+	CHECK_EQ(s.latest, "def5678");
+}
+
+TEST(evaluate_stable_silent_on_error_line)
+{
+	// An error= line means offline/transient: never offer, regardless of the
+	// other fields (which the script would not have printed anyway).
+	const std::string out =
+		"error=stable リリースを取得できませんでした。\n";
+	StableStatus s = EvaluateStable(out);
+	CHECK(!s.offerUpdate);
+	CHECK_EQ(s.latest, "");
+	CHECK_EQ(s.url, "");
+}
+
+TEST(evaluate_stable_silent_when_incomplete)
+{
+	// latest present but url missing -> incomplete -> no offer.
+	StableStatus a = EvaluateStable("installed=abc\nlatest=def\n");
+	CHECK(!a.offerUpdate);
+	// url present but latest missing -> incomplete -> no offer.
+	StableStatus b = EvaluateStable("installed=abc\nurl=https://ex.com/x.zip\n");
+	CHECK(!b.offerUpdate);
+}
+
+TEST(evaluate_stable_offers_with_no_installed_build)
+{
+	// First-ever install: nothing installed yet, but a build is published.
+	const std::string out =
+		"installed=none\n"
+		"latest=def5678\n"
+		"url=https://ex.com/x.zip\n";
+	StableStatus s = EvaluateStable(out);
+	CHECK(s.offerUpdate);
+	CHECK_EQ(s.installed, "none");
+}
+
+// ---------------------------------------------------------------------------
+// DevSwitchCandidates — parse dev builds and drop the running one.
+// ---------------------------------------------------------------------------
+
+TEST(dev_switch_candidates_excludes_running_commit)
+{
+	const std::string out =
+		"installed=c0ffee1\n"
+		"build\tc0ffee1\tmain\thttps://ex.com/a.zip\n"     // running -> dropped
+		"build\tdeadbee\tfeature/x\thttps://ex.com/b.zip\n"
+		"build\tfeed123\tfeature/y\thttps://ex.com/c.zip\n";
+	std::vector<DevBuild> others = DevSwitchCandidates(out, "c0ffee1");
+	CHECK_EQ(others.size(), static_cast<std::size_t>(2));
+	if (others.size() == 2)
+	{
+		// Order preserved; the running build is gone.
+		CHECK_EQ(others[0].commit, "deadbee");
+		CHECK_EQ(others[1].commit, "feed123");
+	}
+}
+
+TEST(dev_switch_candidates_keeps_all_when_running_absent)
+{
+	const std::string out =
+		"build\tc1\tbranch-a\thttps://ex.com/a.zip\n"
+		"build\tc2\tbranch-b\thttps://ex.com/b.zip\n";
+	// Running commit not among the builds (e.g. a local build) -> keep both.
+	std::vector<DevBuild> others = DevSwitchCandidates(out, "local");
+	CHECK_EQ(others.size(), static_cast<std::size_t>(2));
+}
+
+TEST(dev_switch_candidates_empty_when_no_builds)
+{
+	CHECK_EQ(DevSwitchCandidates("installed=none\n", "local").size(),
+			 static_cast<std::size_t>(0));
+}
+
+// ---------------------------------------------------------------------------
+// ResolveDevSelection — map a picker index back to a candidate.
+// ---------------------------------------------------------------------------
+
+TEST(resolve_dev_selection_zero_keeps_current)
+{
+	// Entry 0 is the installed build -> "keep current" -> -1.
+	CHECK_EQ(ResolveDevSelection(0, 3), -1);
+}
+
+TEST(resolve_dev_selection_negative_keeps_current)
+{
+	// No/!invalid selection defensively maps to "keep current".
+	CHECK_EQ(ResolveDevSelection(-1, 3), -1);
+}
+
+TEST(resolve_dev_selection_maps_to_candidate_index)
+{
+	// Picker entry 1 -> candidate 0, entry 3 -> candidate 2.
+	CHECK_EQ(ResolveDevSelection(1, 3), 0);
+	CHECK_EQ(ResolveDevSelection(3, 3), 2);
+}
+
+TEST(resolve_dev_selection_out_of_range_keeps_current)
+{
+	// Selection past the last candidate -> safeguard -> -1.
+	CHECK_EQ(ResolveDevSelection(4, 3), -1);
+	// No candidates at all: any positive selection is out of range.
+	CHECK_EQ(ResolveDevSelection(1, 0), -1);
+}
+
+// ---------------------------------------------------------------------------
+// InstallReportedOk / InstallErrorText — interpret do-install output.
+// ---------------------------------------------------------------------------
+
+TEST(install_reported_ok_true_for_ok)
+{
+	CHECK(InstallReportedOk("ok"));
+	CHECK(InstallReportedOk("  ok \n"));	// Trim tolerates surrounding whitespace
+}
+
+TEST(install_reported_ok_false_otherwise)
+{
+	CHECK(!InstallReportedOk(""));
+	CHECK(!InstallReportedOk("error=ダウンロードに失敗しました。\n"));
+	CHECK(!InstallReportedOk("okay"));		// must be exactly "ok"
+}
+
+TEST(install_error_text_uses_script_error)
+{
+	const std::string out = "error=ダウンロードに失敗しました。\n";
+	CHECK_EQ(InstallErrorText(out, "fallback"), "ダウンロードに失敗しました。");
+}
+
+TEST(install_error_text_falls_back_when_no_error)
+{
+	// No error= line (e.g. garbled output): use the caller's fallback wording.
+	CHECK_EQ(InstallErrorText("something unexpected\n", "fallback"), "fallback");
+	CHECK_EQ(InstallErrorText("", "fallback"), "fallback");
 }
 
 // ---------------------------------------------------------------------------

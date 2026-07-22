@@ -195,5 +195,89 @@ namespace UpdaterParse
 			return "";
 		return moduleDir + "\\vw-update.ps1";
 	}
+
+	// ---------------------------------------------------------------------
+	// Update-flow decisions. These are the branch-y choices the updater makes
+	// once it has the script's output in hand — "is there a newer build?",
+	// "which builds can I switch to?", "did the install succeed?". They were the
+	// last pieces of real logic still inlined in Updater.cpp between gSDK calls;
+	// pulled out here (operating only on strings/vectors, no gSDK) they are
+	// exercised by the unit tests, while Updater.cpp keeps just the native-dialog
+	// glue that acts on the result.
+	// ---------------------------------------------------------------------
+
+	// Outcome of interpreting `q-stable` output for the stable-channel startup
+	// check. offerUpdate is the single decision Updater.cpp acts on; the other
+	// fields feed the dialog it then shows.
+	struct StableStatus
+	{
+		bool		offerUpdate = false;	// a newer build exists -> prompt to install
+		std::string	installed;				// installed commit ("" if none/unknown)
+		std::string	latest;					// latest published commit
+		std::string	url;					// asset download URL for `latest`
+	};
+
+	// Decide whether the stable channel has an update worth prompting for.
+	// offerUpdate is true only when the output is well-formed (no error= line,
+	// both latest and url present) AND latest differs from the installed commit.
+	// A transient error, incomplete output, or an already-current install all
+	// yield offerUpdate == false (Updater.cpp then stays silent).
+	inline StableStatus EvaluateStable(const std::string& out)
+	{
+		StableStatus s;
+		if (!ValueOf(out, "error").empty())
+			return s;							// offline / transient -> stay silent
+		s.installed = ValueOf(out, "installed");
+		s.latest    = ValueOf(out, "latest");
+		s.url       = ValueOf(out, "url");
+		if (s.latest.empty() || s.url.empty())
+			return s;							// incomplete -> stay silent
+		if (s.installed == s.latest)
+			return s;							// already current -> no dialog
+		s.offerUpdate = true;
+		return s;
+	}
+
+	// The builds the dev picker offers to switch TO: every parsed build except
+	// the one already running (matched by commit). Order is preserved, so
+	// candidate i maps to picker entry i+1 (entry 0 is the "keep current" row).
+	inline std::vector<DevBuild> DevSwitchCandidates(const std::string& out,
+													 const std::string& runningCommit)
+	{
+		std::vector<DevBuild> others;
+		for (const DevBuild& b : ParseDevBuilds(out))
+			if (b.commit != runningCommit)
+				others.push_back(b);
+		return others;
+	}
+
+	// Map the picker's 0-based selection back to an index into the candidate list
+	// (as returned by DevSwitchCandidates). Entry 0 is "keep the current build",
+	// so a selection <= 0 -> -1. A selection past the last candidate is also
+	// treated as "keep current" (a safeguard) -> -1. Otherwise -> selection - 1.
+	inline int ResolveDevSelection(short selection, std::size_t candidateCount)
+	{
+		if (selection <= 0)
+			return -1;							// kept the installed build
+		std::size_t idx = static_cast<std::size_t>(selection) - 1;
+		if (idx >= candidateCount)
+			return -1;							// out of range -> keep current
+		return static_cast<int>(idx);
+	}
+
+	// True if `do-install` reported success (its sole success token is "ok").
+	inline bool InstallReportedOk(const std::string& out)
+	{
+		return Trim(out) == "ok";
+	}
+
+	// The message to show when `do-install` did NOT succeed: the script's own
+	// "error=" line if it printed one, otherwise the caller's generic fallback
+	// (the fallback is passed in so the user-facing wording stays in Updater.cpp).
+	inline std::string InstallErrorText(const std::string& out, const std::string& fallback)
+	{
+		std::string e = ValueOf(out, "error");
+		return e.empty() ? fallback : e;
+	}
 }
 }
