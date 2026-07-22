@@ -16,10 +16,16 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Updater.h"
+#include "UpdaterParse.h"
 
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// The pure parsing/quoting/path helpers live in UpdaterParse.h so they can be
+// unit-tested without the SDK. Pull them into this file's scope; everything
+// below is the platform-specific glue that uses them.
+using namespace SamplePlugin::UpdaterParse;
 
 #if GS_MAC
 #	include <dlfcn.h>
@@ -51,14 +57,8 @@ namespace
 			|| info.dli_fname == nullptr)
 			return "";
 
-		std::string path = info.dli_fname;					// .../Contents/MacOS/<name>
-		const std::string marker = "/Contents/MacOS/";
-		std::string::size_type at = path.rfind(marker);
-		if (at == std::string::npos)
-			return "";
-
-		std::string contents = path.substr(0, at + std::string("/Contents/").size());
-		return contents + "Resources/vw-update.sh";
+		// .../Contents/MacOS/<name> -> .../Contents/Resources/vw-update.sh
+		return MacScriptPathFromBinary(info.dli_fname);
 	}
 
 	// Directory that CONTAINS this plug-in's .vwlibrary bundle — i.e. the exact
@@ -79,30 +79,8 @@ namespace
 			|| info.dli_fname == nullptr)
 			return "";
 
-		std::string path = info.dli_fname;					// .../<PlugIns>/<name>.vwlibrary/Contents/MacOS/<name>
-		std::string::size_type at = path.rfind("/Contents/MacOS/");
-		if (at == std::string::npos)
-			return "";
-
-		std::string bundle = path.substr(0, at);			// .../<PlugIns>/<name>.vwlibrary
-		std::string::size_type slash = bundle.rfind('/');
-		if (slash == std::string::npos)
-			return "";
-		return bundle.substr(0, slash);						// .../<PlugIns>
-	}
-
-	// Wrap a string in single quotes so it is safe as one /bin/sh word, escaping
-	// any embedded single quotes (bundle paths and URLs can contain surprises).
-	std::string ShellQuote(const std::string& s)
-	{
-		std::string out = "'";
-		for (char c : s)
-		{
-			if (c == '\'')	out += "'\\''";
-			else			out += c;
-		}
-		out += "'";
-		return out;
+		// .../<PlugIns>/<name>.vwlibrary/Contents/MacOS/<name> -> .../<PlugIns>
+		return MacPluginsDirFromBinary(info.dli_fname);
 	}
 
 	// Run "vw-update.sh <args>" and capture its stdout into out. Blocks until the
@@ -192,39 +170,20 @@ namespace
 	// the updater script sits and the Plug-Ins folder to install into.
 	std::string OwnModuleDir()
 	{
-		std::string path = OwnModulePath();				// ...\<PlugIns>\<name>.vlb
-		std::string::size_type slash = path.find_last_of("\\/");
-		if (slash == std::string::npos)
-			return "";
-		return path.substr(0, slash);					// ...\<PlugIns>
+		// ...\<PlugIns>\<name>.vlb -> ...\<PlugIns>
+		return WinModuleDirFromPath(OwnModulePath());
 	}
 
 	// The bundled updater script sits next to the module (see CMakeLists.txt).
 	std::string BundledScriptPath()
 	{
-		std::string dir = OwnModuleDir();
-		if (dir.empty())
-			return "";
-		return dir + "\\vw-update.ps1";
+		return WinScriptPathFromDir(OwnModuleDir());
 	}
 
 	// The Plug-Ins folder this build was loaded from == the module's own folder.
 	std::string BundlePluginsDir()
 	{
 		return OwnModuleDir();
-	}
-
-	// Wrap a string in double quotes for a cmd.exe/PowerShell command line. Our
-	// arguments are release-asset URLs and fixed plug-in names, which never
-	// contain quotes; drop any that somehow appear rather than risk breaking the
-	// quoting.
-	std::string CmdQuote(const std::string& s)
-	{
-		std::string out = "\"";
-		for (char c : s)
-			if (c != '"') out += c;
-		out += "\"";
-		return out;
 	}
 
 	// Run "vw-update.ps1 <args>" via PowerShell and capture its stdout into out.
@@ -271,74 +230,10 @@ namespace
 
 #endif	// GS_WIN
 
-	// -----------------------------------------------------------------------
-	// Tiny parsing helpers for the script's key=value / TSV output. Shared: the
-	// two scripts print the same machine-readable format on both platforms.
-	// -----------------------------------------------------------------------
-
-	std::string Trim(const std::string& s)
-	{
-		std::string::size_type b = s.find_first_not_of(" \t\r\n");
-		if (b == std::string::npos) return "";
-		std::string::size_type e = s.find_last_not_of(" \t\r\n");
-		return s.substr(b, e - b + 1);
-	}
-
-	// Value of the first "key=value" line whose key matches (key without '='),
-	// or "" if absent.
-	std::string ValueOf(const std::string& out, const std::string& key)
-	{
-		std::string needle = key + "=";
-		std::string::size_type pos = 0;
-		while (pos < out.size())
-		{
-			std::string::size_type eol = out.find('\n', pos);
-			std::string line = out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
-			if (line.compare(0, needle.size(), needle) == 0)
-				return Trim(line.substr(needle.size()));
-			if (eol == std::string::npos) break;
-			pos = eol + 1;
-		}
-		return "";
-	}
-
-	struct DevBuild
-	{
-		std::string	commit;
-		std::string	name;
-		std::string	url;
-	};
-
-	// Parse the "build<TAB>commit<TAB>name<TAB>url" lines from q-dev output.
-	std::vector<DevBuild> ParseDevBuilds(const std::string& out)
-	{
-		std::vector<DevBuild> builds;
-		std::string::size_type pos = 0;
-		while (pos < out.size())
-		{
-			std::string::size_type eol = out.find('\n', pos);
-			std::string line = out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
-			pos = (eol == std::string::npos) ? out.size() : eol + 1;
-
-			if (line.compare(0, 6, "build\t") != 0)
-				continue;
-
-			// Split the three tab-separated fields after "build".
-			std::string rest = line.substr(6);
-			std::string::size_type t1 = rest.find('\t');
-			if (t1 == std::string::npos) continue;
-			std::string::size_type t2 = rest.find('\t', t1 + 1);
-			if (t2 == std::string::npos) continue;
-
-			DevBuild b;
-			b.commit = Trim(rest.substr(0, t1));
-			b.name   = Trim(rest.substr(t1 + 1, t2 - (t1 + 1)));
-			b.url    = Trim(rest.substr(t2 + 1));
-			if (!b.url.empty())
-				builds.push_back(b);
-		}
-		return builds;
-	}
+	// The script-output parsing helpers (Trim / ValueOf / DevBuild /
+	// ParseDevBuilds) are SDK-independent and live in UpdaterParse.h so they can
+	// be unit-tested; they are pulled in via the `using namespace` at the top of
+	// this file and used unchanged below.
 
 	// -----------------------------------------------------------------------
 	// Native pull-down list dialog (VWFC::VWUI) for choosing a build.

@@ -53,9 +53,27 @@ if(APPLE)
 	enable_language(OBJCXX)
 endif()
 
-if(NOT APPLE AND NOT WIN32)
-	message(FATAL_ERROR "This Vectorworks plug-in can only be built on macOS or Windows.")
+# --- Build options -----------------------------------------------------------
+# The loadable plug-in (needs the Vectorworks SDK; macOS/Windows only) and the
+# unit tests are independent build products:
+#   * VW_BUILD_PLUGIN (default ON)  -> the .vwlibrary / .vlb plug-in.
+#   * VW_BUILD_TESTS  (default OFF) -> the SDK-free unit tests (src/UpdaterParse.h).
+#                                      These build on ANY platform, so the coverage
+#                                      job can run them on a plain Linux runner
+#                                      with -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON.
+#   * VW_ENABLE_COVERAGE (default OFF) -> add gcov instrumentation to the tests.
+option(VW_BUILD_PLUGIN "Build the Vectorworks plug-in (requires the VW SDK)" ON)
+option(VW_BUILD_TESTS "Build the unit tests" OFF)
+option(VW_ENABLE_COVERAGE "Instrument the tests for code coverage (gcov/llvm-cov)" OFF)
+
+if(VW_BUILD_PLUGIN AND NOT APPLE AND NOT WIN32)
+	message(FATAL_ERROR
+		"The Vectorworks plug-in can only be built on macOS or Windows. To build "
+		"just the unit tests on this platform, configure with "
+		"-DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON.")
 endif()
+
+if(VW_BUILD_PLUGIN)
 
 # --- Locate the Vectorworks SDK ---------------------------------------------
 if(NOT DEFINED VW_SDK_DIR AND DEFINED ENV{VW_SDK_DIR})
@@ -321,3 +339,13 @@ endfunction()
 # can be installed and loaded at the same time.
 add_vw_plugin(SamplePlugin    "SamplePlugin"    "com.example.vectorworks.SamplePlugin"    "stable")
 add_vw_plugin(SamplePluginDev "SamplePluginDev" "com.example.vectorworks.SamplePluginDev" "dev" DEV)
+
+endif()	# VW_BUILD_PLUGIN
+
+# --- Unit tests --------------------------------------------------------------
+# SDK-free tests for the updater's parsing/quoting/path helpers. They build on
+# any platform, so a fast Linux job can run them and measure coverage.
+if(VW_BUILD_TESTS)
+	enable_testing()
+	add_subdirectory(tests)
+endif()
