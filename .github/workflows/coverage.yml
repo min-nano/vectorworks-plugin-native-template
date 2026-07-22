@@ -1,0 +1,82 @@
+name: Coverage
+
+# Build and run the SDK-free unit tests (src/UpdaterParse.h), measure code
+# coverage, and publish it to GitHub Code Quality. Because the tests do NOT need
+# the Vectorworks SDK, this runs on a plain Linux runner — no ~800 MB SDK
+# download — so it is fast and works on pull requests from forks too (upload is
+# then skipped, see below).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# actions/upload-code-coverage needs code-quality:write to publish the report;
+# pull-requests:read lets it associate coverage with the PR.
+permissions:
+  contents: read
+  code-quality: write
+  pull-requests: read
+
+# One coverage run per ref; a new push cancels an in-flight run for that ref.
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build + coverage tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ gcovr
+
+      # Tests only (VW_BUILD_PLUGIN=OFF), instrumented for gcov. No SDK required.
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON \
+            -DVW_ENABLE_COVERAGE=ON
+
+      - name: Build tests
+        run: cmake --build build -v
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      # Emit a Cobertura XML report over the plug-in sources under src/. The
+      # build tree holds the gcov data; --root . keeps paths repo-relative so
+      # GitHub can map coverage back to the files.
+      - name: Generate coverage report (Cobertura)
+        run: |
+          gcovr --root . --filter 'src/.*' build \
+            --cobertura coverage.xml \
+            --txt --print-summary
+
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-cobertura
+          path: coverage.xml
+
+      # Publish to GitHub Code Quality. Skipped for pull requests from forks,
+      # whose GITHUB_TOKEN is read-only and cannot upload (mirrors how build.yml
+      # guards its fork PRs).
+      - name: Upload coverage to GitHub Code Quality
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-code-coverage@v1
+        with:
+          file: coverage.xml
+          language: C++
+          label: code-coverage/gcovr

@@ -208,6 +208,46 @@ Gatekeeper もアドホック署名も無いぶん手順は簡単です:
 Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファイル）は、警告の出ない
 *署名済み*プラグインを配布する場合にのみ必要で、ビルドや社内での実行には不要です。
 
+## テストとカバレッジ
+
+アップデータ（`src/Updater.cpp`）のうち、SDK に依存しない純粋なロジック
+（スクリプト出力のパース、コマンドラインのクォート、インストール先パスの導出）は
+`src/UpdaterParse.h` に切り出してあります。これにより、Vectorworks SDK なしで
+**どのプラットフォームでも**ユニットテストを実行できます。テスト本体は
+`tests/`（`tests/UpdaterParseTests.cpp`）にあり、外部依存のない極小のテストハーネス
+（`tests/TestFramework.h`）を使うため、テストフレームワークのダウンロードも不要です。
+
+ローカルでの実行（SDK 不要）:
+
+```bash
+cmake -S . -B build-tests -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
+
+ビルドオプション:
+
+- `VW_BUILD_PLUGIN`（既定 `ON`）… プラグイン本体をビルドします（SDK が必要で、
+  macOS / Windows のみ）。テストだけをビルドしたいときは `OFF` にします。
+- `VW_BUILD_TESTS`（既定 `OFF`）… ユニットテストをビルドします。
+- `VW_ENABLE_COVERAGE`（既定 `OFF`）… テストに gcov 用の計測を付けます（GCC / Clang）。
+
+### カバレッジと GitHub Code Quality
+
+`.github/workflows/coverage.yml` が、テストを Linux ランナー（SDK のダウンロード不要
+なので高速）で実行し、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成して、
+`actions/upload-code-coverage` で **GitHub Code Quality** に送信します。カバレッジは
+プルリクエスト上に集計値として表示されます。アップロードには `code-quality: write`
+権限が必要で、トークンが読み取り専用となるフォーク PR ではスキップされます
+（レポートはアーティファクトとしては常に保存されます）。
+
+```bash
+cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_COVERAGE=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-summary
+```
+
 ## 継続的インテグレーション（CI）
 
 `.github/workflows/build.yml` がプラグインをビルドします。`main` は保護された
