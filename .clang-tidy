@@ -51,7 +51,8 @@ Checks: >
 WarningsAsErrors: "*"
 
 # Only diagnose the project's own headers (src/ and tests/), never the SDK or
-# system/toolchain headers.
-HeaderFilterRegex: "(src|tests)/"
+# system/toolchain headers. The character class accepts both path separators so
+# it works on the Windows compile database too (clang-cl paths).
+HeaderFilterRegex: '(src|tests)[/\\]'
 
 FormatStyle: file

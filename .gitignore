@@ -3,6 +3,7 @@
 /build-tests/
 /buildcov/
 /build-lint/
+/build-tidy/
 /dist/
 *.vwlibrary
 *.vlb

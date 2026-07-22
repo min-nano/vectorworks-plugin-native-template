@@ -321,10 +321,24 @@ gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-su
   コードも含めて**全ファイル**を対象にできます。
 - **`clang-tidy`** — SDK 非依存のアップデータロジック（`src/UpdaterFlow.cpp` と
   それが取り込む `UpdaterParse.h` / `UpdaterHost.h`）に対して静的解析を行います。
-  clang-tidy は翻訳単位を実際にコンパイルする必要があり、プラグイン本体のグルー
-  は SDK が要るため、SDK 不要な Linux ランナー上では**実ロジックを持つ SDK 非依存
-  コード**を対象にします（残りは上記の clang-format が担保）。`.clang-tidy` は
-  `WarningsAsErrors: "*"` なので、検出があれば CI が失敗します。
+  clang-tidy は翻訳単位を実際にコンパイルする必要があり、SDK が不要なこの Linux
+  ランナー上では**実ロジックを持つ SDK 非依存コード**を対象にします。`.clang-tidy`
+  は `WarningsAsErrors: "*"` なので、検出があれば CI が失敗します。
+
+**SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
+ないとコンパイルできないプラグイン本体（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp`
+/ `Updater.cpp`）にも適用します。ビルドジョブは SDK を用意するので、**ビルド直前**に
+clang-tidy を走らせて全ソースを網羅します。
+
+- **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
+  database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
+- **Windows ジョブ** — Visual Studio ジェネレータは compile database を出力しない
+  ため、解析専用に **Ninja + clang-cl** でビルドせずに再コンフィグして database を
+  生成し、`#if GS_WIN` 側の分岐（`Updater.cpp` の `Widen` / `Narrow` /
+  `OwnModulePath` / `RunBundledScript`）を解析します。
+
+macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
+**すべての行**が clang-tidy でチェックされます。
 
 どちらのツールもメジャーバージョン 18 に固定してあり、結果が安定します。
 
@@ -354,10 +368,11 @@ scripts/lint.sh --fix    # その場で自動修正（clang-format -i と clang-
 > [`cmake-format`](https://github.com/cheshirekow/cmake_format)、ワークフロー
 > YAML の検証に [`actionlint`](https://github.com/rhysd/actionlint)、コミット前の
 > 自動実行に [`pre-commit`](https://pre-commit.com/)、追加の静的解析に
-> [`cppcheck`](https://cppcheck.sourceforge.io/) を組み合わせられます。プラグイン
-> 本体のグルー（`Updater.cpp` など）まで clang-tidy を掛けたい場合は、SDK を用意
-> したうえで `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` でビルドし、生成された
-> `compile_commands.json` に対してローカルで `clang-tidy` を実行してください。
+> [`cppcheck`](https://cppcheck.sourceforge.io/) を組み合わせられます。SDK 依存の
+> プラグイン本体（`Updater.cpp` など）は CI（`build.yml`）で clang-tidy を掛けて
+> いますが、ローカルで掛けたい場合は SDK を用意したうえで
+> `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` でコンフィグし、生成された
+> `compile_commands.json` に対して `clang-tidy` を実行してください。
 
 ## SDK ドキュメント（API 仕様）
 

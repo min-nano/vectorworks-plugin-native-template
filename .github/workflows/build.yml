@@ -127,7 +127,29 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
-            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
+      # build. The SDK-free lint workflow (lint.yml) already tidies the updater
+      # logic on a plain Linux runner; this step extends the SAME .clang-tidy
+      # rules to the code that only compiles against the Vectorworks SDK
+      # (ModuleMain / ExtMenu / Updater). Configuring with
+      # CMAKE_EXPORT_COMPILE_COMMANDS above gives clang-tidy the exact compile
+      # flags for each file. This job compiles the GS_MAC branches; the Windows
+      # job runs the same check for the GS_WIN branches, so together they cover
+      # every line. clang-tidy is pinned to 18 (Homebrew) to match .clang-tidy.
+      - name: Static analysis (clang-tidy, SDK-dependent code)
+        run: |
+          set -euo pipefail
+          brew install llvm@18
+          tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
+          "$tidy" --version
+          "$tidy" -p build --warnings-as-errors='*' \
+            src/ModuleMain.cpp \
+            src/Extensions/ExtMenu.cpp \
+            src/Updater.cpp \
+            src/UpdaterFlow.cpp
 
       - name: Build
         # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) bundles.
@@ -304,6 +326,59 @@ jobs:
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
+
+      # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
+      # build — the Windows counterpart to the macOS clang-tidy step. It covers
+      # the GS_WIN branches (Widen / Narrow / OwnModulePath / RunBundledScript in
+      # Updater.cpp) that the macOS job preprocesses out, so the two jobs
+      # together tidy every line.
+      #
+      # The Visual Studio generator used for the real build does NOT emit a
+      # compile_commands.json, so a SEPARATE, build-free configure with Ninja +
+      # clang-cl produces the compile database for clang-tidy. clang-cl inherits
+      # the same Windows (non-APPLE) settings from CMakeLists.txt (_WINDOWS, /MD,
+      # the OnlyWin include dir), so the database matches the real MSVC build's
+      # GS_WIN configuration. Nothing is built here — only configured — so the
+      # link-only SDK libraries are never needed.
+      - name: Set up MSVC environment (for clang-cl)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install LLVM 18 + Ninja (for clang-tidy)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install --no-progress -y ninja
+          choco install --no-progress -y llvm --version=18.1.8 --allow-downgrade
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Configure compile database (Ninja + clang-cl, no build)
+        shell: bash
+        env:
+          VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
+          VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          cmake -S . -B build-tidy -G Ninja \
+            -DCMAKE_C_COMPILER=clang-cl \
+            -DCMAKE_CXX_COMPILER=clang-cl \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Static analysis (clang-tidy, SDK-dependent code)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tidy="/c/Program Files/LLVM/bin/clang-tidy"
+          "$tidy" --version
+          "$tidy" -p build-tidy --warnings-as-errors='*' \
+            src/ModuleMain.cpp \
+            src/Extensions/ExtMenu.cpp \
+            src/Updater.cpp \
+            src/UpdaterFlow.cpp
 
       - name: Build
         # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) modules.
