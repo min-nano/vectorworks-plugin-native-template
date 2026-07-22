@@ -234,10 +234,13 @@ ctest --test-dir build-tests --output-on-failure
 
 ### カバレッジと GitHub Code Quality
 
-`.github/workflows/coverage.yml` が、テストを Linux ランナー（SDK のダウンロード不要
-なので高速）で実行し、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成して、
-`actions/upload-code-coverage` で **GitHub Code Quality** に送信します。カバレッジは
-プルリクエスト上に集計値として表示されます。アップロードには `code-quality: write`
+`.github/workflows/test.yml` は、テストを Linux ランナー（SDK のダウンロード不要
+なので高速）で実行する **`test` ジョブ**と、それに続く **`coverage` ジョブ**の 2 つに
+分かれています。`test` の失敗はテスト自体の失敗を、`coverage` の失敗はレポート生成／
+アップロードの失敗を意味するので、原因を切り分けやすくしています。`coverage` ジョブは
+`test` の成功後にのみ実行され、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成
+して、`actions/upload-code-coverage` で **GitHub Code Quality** に送信します。カバレッジ
+はプルリクエスト上に集計値として表示されます。アップロードには `code-quality: write`
 権限が必要で、トークンが読み取り専用となるフォーク PR ではスキップされます
 （レポートはアーティファクトとしては常に保存されます）。
 

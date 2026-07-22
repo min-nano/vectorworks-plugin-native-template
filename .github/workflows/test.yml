@@ -1,6 +1,8 @@
-name: Coverage
+name: Tests
 
-# Two jobs, split so a failure points straight at its cause:
+# The project's main CI for correctness: it runs the unit tests and, on top of
+# that, measures and publishes coverage. Two jobs, split so a failure points
+# straight at its cause:
 #   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them.
 #                A red X here means a TEST failed.
 #   * coverage — only after `test` passes: rebuild with gcov instrumentation,
@@ -18,9 +20,9 @@ on:
   pull_request:
   workflow_dispatch:
 
-# One coverage run per ref; a new push cancels an in-flight run for that ref.
+# One test run per ref; a new push cancels an in-flight run for that ref.
 concurrency:
-  group: coverage-${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
