@@ -1,18 +1,23 @@
 name: Tests
 
 # The project's main CI for correctness: it runs the unit tests and, on top of
-# that, measures and publishes coverage. Two jobs, split so a failure points
+# that, measures and reports coverage. Two jobs, split so a failure points
 # straight at its cause:
 #   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them.
 #                A red X here means a TEST failed.
 #   * coverage — only after `test` passes: rebuild with gcov instrumentation,
-#                produce a Cobertura report, and publish it to GitHub Code
-#                Quality. A red X here means REPORT GENERATION/UPLOAD failed,
-#                not a test.
+#                produce a Cobertura report, and post it as a comment on the
+#                pull request (overall coverage + coverage of the lines this PR
+#                changed, via diff-cover against the base branch). A red X here
+#                means REPORT GENERATION failed, not a test.
+#
+# Coverage is reported entirely inside GitHub Actions — there is no dependency
+# on GitHub Code Quality or any other external service. The report is posted as
+# a single, self-updating PR comment and always kept as a build artifact.
 #
 # Because the tests do NOT need the Vectorworks SDK, both jobs run on a plain
 # Linux runner — no ~800 MB SDK download — so they are fast and work on pull
-# requests from forks too (the Code Quality upload is then skipped, see below).
+# requests from forks too (the comment step is then skipped, see below).
 
 on:
   push:
@@ -59,25 +64,34 @@ jobs:
 
   coverage:
     # Runs only if `test` succeeded, so a coverage-job failure is unambiguously
-    # about the report (gcovr / upload), never a failing test.
+    # about the report (gcovr / diff-cover), never a failing test.
     needs: test
     runs-on: ubuntu-latest
-    # actions/upload-code-coverage needs code-quality:write to publish the
-    # report; pull-requests:read lets it associate coverage with the PR.
+    # pull-requests:write lets the job post/update the coverage comment on PRs.
+    # contents:read is all the build itself needs.
     permissions:
       contents: read
-      code-quality: write
-      pull-requests: read
+      pull-requests: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # diff-cover needs the base branch's history to compute which lines
+          # this PR changed, so fetch the full history rather than a shallow
+          # clone.
+          fetch-depth: 0
 
       - name: Install build + coverage tools
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake g++ gcovr
+          # diff-cover: reports coverage of only the lines changed vs. the base
+          # branch (like a coverage "diff"). It is a Python CLI tool, so install
+          # it with pipx (preinstalled on the runner) — this sidesteps PEP 668's
+          # "externally-managed-environment" error and puts `diff-cover` on PATH.
+          pipx install diff-cover
 
       # Same tests, this time instrumented for gcov so running them emits
       # coverage data.
@@ -99,28 +113,117 @@ jobs:
 
       # Emit a Cobertura XML report over the plug-in sources under src/. The
       # build tree holds the gcov data; --root . keeps paths repo-relative so
-      # GitHub can map coverage back to the files.
-      - name: Generate coverage report (Cobertura)
+      # diff-cover (and any reader) can map coverage back to the files. The JSON
+      # summary is a machine-readable copy of the overall totals used to build
+      # the PR comment.
+      - name: Generate coverage report (Cobertura + summary)
         run: |
+          set -euo pipefail
           gcovr --root . --filter 'src/.*' build \
             --cobertura coverage.xml \
+            --json-summary coverage-summary.json \
             --txt --print-summary
+
+      # Coverage of ONLY the lines this PR adds/changes, compared against the
+      # base branch (diff-cover uses the merge base). Produces a Markdown
+      # fragment embedded in the PR comment below. PR events only — on a push to
+      # main there is no diff to compare against.
+      - name: Compute diff coverage vs. base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # fetch-depth: 0 above already fetched every branch, so origin/<base>
+          # is present; this is a harmless safety net if that ever changes.
+          git fetch --no-tags origin \
+            "${{ github.event.pull_request.base.ref }}" || true
+          diff-cover coverage.xml \
+            --compare-branch "origin/${{ github.event.pull_request.base.ref }}" \
+            --markdown-report diff-cover.md \
+            --fail-under 0
 
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-cobertura
-          path: coverage.xml
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage-summary.json
+            diff-cover.md
+          if-no-files-found: ignore
 
-      # Publish to GitHub Code Quality. Skipped for pull requests from forks,
-      # whose GITHUB_TOKEN is read-only and cannot upload (mirrors how build.yml
-      # guards its fork PRs).
-      - name: Upload coverage to GitHub Code Quality
+      # Post (or update) a single sticky comment on the PR with the overall
+      # coverage and the diff-coverage table. Skipped for pull requests from
+      # forks, whose GITHUB_TOKEN is read-only and cannot comment (mirrors how
+      # build.yml guards its fork PRs).
+      - name: Comment coverage report on PR
         if: >-
-          github.event_name != 'pull_request' ||
+          github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/upload-code-coverage@v1
+        uses: actions/github-script@v7
         with:
-          file: coverage.xml
-          language: C++
-          label: code-coverage/gcovr
+          script: |
+            const fs = require('fs');
+
+            // Marker used to find our own previous comment and replace it, so
+            // the PR carries exactly one always-current coverage comment.
+            const marker = '<!-- coverage-report -->';
+
+            const pct = (n) =>
+              (typeof n === 'number') ? `${n.toFixed(1)}%` : 'n/a';
+
+            let overall = '_Coverage summary unavailable._';
+            try {
+              const s = JSON.parse(
+                fs.readFileSync('coverage-summary.json', 'utf8'));
+              const rows = [
+                ['Lines', s.line_percent, s.line_covered, s.line_total],
+                ['Branches', s.branch_percent, s.branch_covered, s.branch_total],
+                ['Functions',
+                  s.function_percent, s.function_covered, s.function_total],
+              ].filter((r) => typeof r[1] === 'number');
+              overall = [
+                '| Metric | Coverage | Covered / Total |',
+                '| --- | ---: | ---: |',
+                ...rows.map(
+                  (r) => `| ${r[0]} | ${pct(r[1])} | ${r[2]} / ${r[3]} |`),
+              ].join('\n');
+            } catch (e) {
+              core.warning(`Could not read coverage summary: ${e}`);
+            }
+
+            let diff = '';
+            try {
+              diff = '\n\n### Diff coverage (changed lines vs. base)\n\n' +
+                fs.readFileSync('diff-cover.md', 'utf8').trim() + '\n';
+            } catch (e) {
+              core.warning(`Could not read diff-cover report: ${e}`);
+            }
+
+            const body = [
+              marker,
+              '## 🧪 Test coverage',
+              '',
+              '### Overall (`src/`)',
+              '',
+              overall,
+              diff,
+              '',
+              `<sub>Generated by the \`coverage\` job · ` +
+                `commit ${context.payload.pull_request.head.sha.slice(0, 7)}</sub>`,
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const { data: comments } = await github.rest.issues.listComments(
+              { owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find(
+              (c) => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment(
+                { owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment(
+                { owner, repo, issue_number, body });
+            }
