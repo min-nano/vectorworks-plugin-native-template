@@ -339,12 +339,10 @@ namespace
 			errorOut = "アップデータを起動できませんでした。";
 			return false;
 		}
-		if (Trim(out) == "ok")
+		if (InstallReportedOk(out))
 			return true;
 
-		errorOut = ValueOf(out, "error");
-		if (errorOut.empty())
-			errorOut = "インストールに失敗しました。";
+		errorOut = InstallErrorText(out, "インストールに失敗しました。");
 		return false;
 	}
 }
@@ -363,25 +361,22 @@ namespace SamplePlugin
 		std::string out;
 		if (!RunScript({ "q-stable" }, out))
 			return;								// script missing -> stay silent
-		if (!ValueOf(out, "error").empty())
-			return;								// offline/transient -> stay silent
 
-		std::string installed = ValueOf(out, "installed");
-		std::string latest    = ValueOf(out, "latest");
-		std::string url       = ValueOf(out, "url");
-		if (latest.empty() || url.empty())
+		// All the parse-and-decide logic is in UpdaterParse.h so it is unit-tested;
+		// here we only act on the verdict (offline / incomplete / already-current
+		// all come back as offerUpdate == false).
+		StableStatus st = EvaluateStable(out);
+		if (!st.offerUpdate)
 			return;
-		if (installed == latest)
-			return;								// already current -> no dialog
 
-		std::string shownInstalled = installed.empty() ? "none" : installed;
+		std::string shownInstalled = st.installed.empty() ? "none" : st.installed;
 		if (!Ask("新しい安定版ビルドがあります。今すぐインストールしますか？",
-				 "インストール済み: " + shownInstalled + "\n最新: " + latest,
+				 "インストール済み: " + shownInstalled + "\n最新: " + st.latest,
 				 "インストール", "後で"))
 			return;
 
 		std::string err;
-		if (Install(url, "SamplePlugin", err))
+		if (Install(st.url, "SamplePlugin", err))
 			Inform("SamplePlugin を更新しました。",
 				   "反映するには Vectorworks を再起動してください。");
 		else
@@ -405,18 +400,15 @@ namespace SamplePlugin
 			return;
 		}
 
-		std::vector<DevBuild> all = ParseDevBuilds(out);
-
 		// The build that is actually loaded and running right now. Compiled in,
 		// so it is unambiguous even if a different build is staged on disk.
 		const std::string runningBranch = VW_BUILD_BRANCH;
 		const std::string runningCommit = VW_BUILD_VERSION;
 
 		// Candidates to switch TO: every prerelease except the running build.
-		std::vector<DevBuild> others;
-		for (const DevBuild& b : all)
-			if (b.commit != runningCommit)
-				others.push_back(b);
+		// (Parsing + the exclude-the-running-build filter are unit-tested in
+		// UpdaterParse.h; see DevSwitchCandidates.)
+		std::vector<DevBuild> others = DevSwitchCandidates(out, runningCommit);
 
 		// One drop-down listing everything: entry 0 is the installed build,
 		// entries 1.. are the other branches' prereleases.
@@ -435,14 +427,13 @@ namespace SamplePlugin
 		if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
 			return;								// cancelled -> keep the loaded build
 
-		short sel = dlg.GetSelection();
-		if (sel <= 0)
-			return;								// kept the installed build
-
-		size_t idx = size_t(sel) - 1;			// map back to the "others" list
-		if (idx >= others.size())
-			return;								// out of range safeguard -> keep current
-		const DevBuild& pick = others[idx];
+		// Map the drop-down's selection back to a candidate (entry 0 or an
+		// out-of-range value both mean "keep the installed build"). Logic is
+		// unit-tested; see ResolveDevSelection.
+		int idx = ResolveDevSelection(dlg.GetSelection(), others.size());
+		if (idx < 0)
+			return;
+		const DevBuild& pick = others[static_cast<size_t>(idx)];
 
 		// A different build was chosen: install it (restart to load).
 		std::string err;
