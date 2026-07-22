@@ -3,25 +3,39 @@
 //
 //	Native-dialog front end for the plug-in's self-update. All user interaction
 //	uses the Vectorworks SDK (gSDK->AlertInform / gSDK->AlertQuestion). The
-//	actual work (GitHub API, download, install) is delegated to the bundled
-//	vw-update.sh script, invoked non-interactively; see Updater.h for the
-//	contract.
+//	actual work (GitHub API, download, install) is delegated to a bundled
+//	updater script, invoked non-interactively; see Updater.h for the contract.
+//
+//	The script and the way we locate ourselves are platform-specific:
+//	  * macOS   -> vw-update.sh, run with /bin/bash; own path found via dladdr.
+//	  * Windows -> vw-update.ps1, run with PowerShell; own path via
+//	               GetModuleFileName.
+//	Everything else (parsing, native dialogs, the update flows) is shared.
 //
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Updater.h"
 
-#include <dlfcn.h>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#if GS_MAC
+#	include <dlfcn.h>
+#endif
+
 namespace
 {
 	// -----------------------------------------------------------------------
-	// Bundled-script discovery + invocation.
+	// Bundled-script discovery + invocation. Two platform implementations of
+	// the same three primitives:
+	//   BundledScriptPath()  absolute path of the updater script we ship, or "".
+	//   BundlePluginsDir()   the Plug-Ins folder this build was loaded from, or "".
+	//   RunScript(args, out) run the script with args, capture stdout.
 	// -----------------------------------------------------------------------
+
+#if GS_MAC
 
 	// Absolute path of the bundled updater script, or "" if it can't be resolved.
 	//
@@ -93,7 +107,7 @@ namespace
 
 	// Run "vw-update.sh <args>" and capture its stdout into out. Blocks until the
 	// script finishes. Returns false if the script could not be located/started.
-	bool RunScript(const std::string& args, std::string& out)
+	bool RunScript(const std::vector<std::string>& args, std::string& out)
 	{
 		std::string script = BundledScriptPath();
 		if (script.empty())
@@ -107,7 +121,11 @@ namespace
 		if (!pluginsDir.empty())
 			env = "VW_PLUGINS_DIR=" + ShellQuote(pluginsDir) + " ";
 
-		std::string cmd = env + "/bin/bash " + ShellQuote(script) + " " + args + " 2>/dev/null";
+		std::string cmd = env + "/bin/bash " + ShellQuote(script);
+		for (const std::string& a : args)
+			cmd += " " + ShellQuote(a);
+		cmd += " 2>/dev/null";
+
 		FILE* pipe = ::popen(cmd.c_str(), "r");
 		if (pipe == nullptr)
 			return false;
@@ -121,8 +139,141 @@ namespace
 		return true;
 	}
 
+#elif GS_WIN
+
+	// UTF-8 <-> UTF-16 helpers (the Win32 *W APIs and paths are UTF-16; the rest
+	// of this file, and the script's I/O, are UTF-8).
+	std::wstring Widen(const std::string& s)
+	{
+		if (s.empty()) return L"";
+		int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+		std::wstring w(n, L'\0');
+		::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+		return w;
+	}
+
+	std::string Narrow(const std::wstring& w)
+	{
+		if (w.empty()) return "";
+		int n = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+		std::string s(n, '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr);
+		return s;
+	}
+
+	// Full path of THIS module (the loaded .vlb), as UTF-8, or "" on failure.
+	// GetModuleHandleEx with an address inside this module resolves our own DLL
+	// regardless of the executable that loaded it.
+	std::string OwnModulePath()
+	{
+		HMODULE self = nullptr;
+		if (::GetModuleHandleExW(
+				GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				reinterpret_cast<LPCWSTR>(&OwnModulePath), &self) == 0
+			|| self == nullptr)
+			return "";
+
+		std::wstring buf(MAX_PATH, L'\0');
+		DWORD len = ::GetModuleFileNameW(self, &buf[0], (DWORD)buf.size());
+		// Grow once if the path was longer than MAX_PATH.
+		while (len == buf.size())
+		{
+			buf.resize(buf.size() * 2, L'\0');
+			len = ::GetModuleFileNameW(self, &buf[0], (DWORD)buf.size());
+		}
+		if (len == 0)
+			return "";
+		buf.resize(len);
+		return Narrow(buf);
+	}
+
+	// Directory that contains this module. On Windows the plug-in is a bare
+	// "<name>.vlb" living directly in the Plug-Ins folder, so this is both where
+	// the updater script sits and the Plug-Ins folder to install into.
+	std::string OwnModuleDir()
+	{
+		std::string path = OwnModulePath();				// ...\<PlugIns>\<name>.vlb
+		std::string::size_type slash = path.find_last_of("\\/");
+		if (slash == std::string::npos)
+			return "";
+		return path.substr(0, slash);					// ...\<PlugIns>
+	}
+
+	// The bundled updater script sits next to the module (see CMakeLists.txt).
+	std::string BundledScriptPath()
+	{
+		std::string dir = OwnModuleDir();
+		if (dir.empty())
+			return "";
+		return dir + "\\vw-update.ps1";
+	}
+
+	// The Plug-Ins folder this build was loaded from == the module's own folder.
+	std::string BundlePluginsDir()
+	{
+		return OwnModuleDir();
+	}
+
+	// Wrap a string in double quotes for a cmd.exe/PowerShell command line. Our
+	// arguments are release-asset URLs and fixed plug-in names, which never
+	// contain quotes; drop any that somehow appear rather than risk breaking the
+	// quoting.
+	std::string CmdQuote(const std::string& s)
+	{
+		std::string out = "\"";
+		for (char c : s)
+			if (c != '"') out += c;
+		out += "\"";
+		return out;
+	}
+
+	// Run "vw-update.ps1 <args>" via PowerShell and capture its stdout into out.
+	// Blocks until the script finishes. Returns false if it could not be started.
+	bool RunScript(const std::vector<std::string>& args, std::string& out)
+	{
+		std::string script = BundledScriptPath();
+		if (script.empty())
+			return false;
+
+		// Point the script at the folder this build was actually loaded from, so
+		// it reads the installed commit from — and installs over — the copy
+		// Vectorworks really uses (not a guessed default path). The child
+		// PowerShell inherits this process environment.
+		std::string pluginsDir = BundlePluginsDir();
+		if (!pluginsDir.empty())
+			::SetEnvironmentVariableW(L"VW_PLUGINS_DIR", Widen(pluginsDir).c_str());
+
+		std::string cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File "
+			+ CmdQuote(script);
+		for (const std::string& a : args)
+			cmd += " " + CmdQuote(a);
+		cmd += " 2>NUL";
+
+		FILE* pipe = ::_popen(cmd.c_str(), "r");
+		if (pipe == nullptr)
+		{
+			if (!pluginsDir.empty())
+				::SetEnvironmentVariableW(L"VW_PLUGINS_DIR", nullptr);
+			return false;
+		}
+
+		out.clear();
+		char buf[4096];
+		size_t n = 0;
+		while ((n = ::fread(buf, 1, sizeof(buf), pipe)) > 0)
+			out.append(buf, n);
+		::_pclose(pipe);
+
+		if (!pluginsDir.empty())
+			::SetEnvironmentVariableW(L"VW_PLUGINS_DIR", nullptr);
+		return true;
+	}
+
+#endif	// GS_WIN
+
 	// -----------------------------------------------------------------------
-	// Tiny parsing helpers for the script's key=value / TSV output.
+	// Tiny parsing helpers for the script's key=value / TSV output. Shared: the
+	// two scripts print the same machine-readable format on both platforms.
 	// -----------------------------------------------------------------------
 
 	std::string Trim(const std::string& s)
@@ -283,12 +434,12 @@ namespace
 		return r == 1;
 	}
 
-	// Run the bundled installer for one bundle. Returns true on success; fills
+	// Run the bundled installer for one plug-in. Returns true on success; fills
 	// errorOut with the script's message on failure.
 	bool Install(const std::string& url, const std::string& name, std::string& errorOut)
 	{
 		std::string out;
-		if (!RunScript("do-install " + ShellQuote(url) + " " + ShellQuote(name), out))
+		if (!RunScript({ "do-install", url, name }, out))
 		{
 			errorOut = "アップデータを起動できませんでした。";
 			return false;
@@ -315,7 +466,7 @@ namespace SamplePlugin
 		sDone = true;
 
 		std::string out;
-		if (!RunScript("q-stable", out))
+		if (!RunScript({ "q-stable" }, out))
 			return;								// script missing -> stay silent
 		if (!ValueOf(out, "error").empty())
 			return;								// offline/transient -> stay silent
@@ -352,7 +503,7 @@ namespace SamplePlugin
 		sDone = true;
 
 		std::string out;
-		if (!RunScript("q-dev", out) || !ValueOf(out, "error").empty())
+		if (!RunScript({ "q-dev" }, out) || !ValueOf(out, "error").empty())
 		{
 			// Offline / transient: don't block start-up — just carry on with the
 			// currently loaded build.

@@ -288,3 +288,205 @@ jobs:
             echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           fi
+
+  # ---------------------------------------------------------------------------
+  # Windows build. Produces the ".vlb" module (a DLL) plus its sibling ".vwr"
+  # resource, the "<name>.commit" build stamp and the PowerShell updater, zipped
+  # per plug-in. Runs AFTER the macOS job (needs: build) because that job is the
+  # one that creates the rolling "stable" / "dev-<branch>" releases — this job
+  # just attaches its Windows assets to them, so the release must exist first.
+  build-windows:
+    needs: build
+    runs-on: windows-latest
+
+    env:
+      # URL of the Vectorworks 2026 win SDK (mirrors the mac SDK URL naming).
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-win-SDK.zip
+      # Where the trimmed SDK lives after the first download (this is what gets
+      # cached, so the large zip is never downloaded more than once).
+      VW_SDK_DIR: ${{ github.workspace }}/vw-sdk-win
+      # Bump the "v" suffix to force a fresh SDK download.
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-win-v1
+
+    steps:
+      # Same commit/ref resolution as the macOS job (PR head, or pushed sha).
+      - name: Resolve build context
+        id: ctx
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            sha="${{ github.event.pull_request.head.sha }}"
+            ref="${{ github.head_ref }}"
+          else
+            sha="${{ github.sha }}"
+            ref="${{ github.ref_name }}"
+          fi
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ctx.outputs.sha }}
+
+      # Restore the previously trimmed SDK if we have it. Only the pieces needed
+      # to build a Windows plug-in are kept, so the cache is small.
+      - name: Restore Vectorworks SDK cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      - name: Download and trim Vectorworks SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Silencing progress makes Invoke-* and curl far faster in CI.
+          $ProgressPreference = 'SilentlyContinue'
+
+          $work = Join-Path $env:RUNNER_TEMP 'vw-sdk-dl'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $zip = Join-Path $work 'sdk.zip'
+
+          Write-Host 'Downloading SDK (this is large)...'
+          curl.exe -fL --retry 4 --retry-delay 5 -o $zip $env:VW_SDK_URL
+          if ($LASTEXITCODE -ne 0) { throw "SDK download failed ($LASTEXITCODE)" }
+
+          Write-Host 'Extracting...'
+          $ex = Join-Path $work 'extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $ex -Force
+
+          $sdklib = Get-ChildItem -LiteralPath $ex -Recurse -Directory -Filter 'SDKLib' |
+            Select-Object -First 1
+          if (-not $sdklib) { Write-Error '::error::Could not find SDKLib inside the downloaded SDK.'; exit 1 }
+          Write-Host "Found SDKLib at: $($sdklib.FullName)"
+
+          # Keep only what a Windows plug-in build needs:
+          #  - Include:  headers
+          #  - LibWin:   VWSDK.lib and the VWMM import library
+          #  - Source:   some Include/ headers #include ../../../Source/VWSDK/...
+          #  - ToolsWin: buildvwr.exe + 7-Zip, which package the .vwr resource
+          $dst = Join-Path $env:VW_SDK_DIR 'SDKLib'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          foreach ($sub in 'Include','LibWin','Source','ToolsWin') {
+            $s = Join-Path $sdklib.FullName $sub
+            if (Test-Path -LiteralPath $s) {
+              Copy-Item -LiteralPath $s -Destination $dst -Recurse -Force
+            } else {
+              Write-Host "(note) SDKLib/$sub not present in this SDK; skipping."
+            }
+          }
+
+          Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host 'Trimmed SDK contents:'
+          Get-ChildItem -LiteralPath $dst | Select-Object Name
+
+      - name: Verify SDK is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
+          test -f "$VW_SDK_DIR/SDKLib/LibWin/Release/VWSDK.lib"
+          test -f "$VW_SDK_DIR/SDKLib/ToolsWin/BuildVWR/buildvwr.exe"
+          echo "SDK looks good."
+
+      - name: Configure
+        shell: bash
+        env:
+          VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
+          VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          cmake -S . -B build -A x64 \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
+
+      - name: Build
+        # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) modules.
+        shell: bash
+        run: cmake --build build --config Release -v
+
+      - name: Inspect built plug-ins
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="build/Release"
+          for name in SamplePlugin SamplePluginDev; do
+            echo "== $name =="
+            test -f "$d/$name.vlb" || { echo "::error::$name.vlb was not produced"; exit 1; }
+            test -f "$d/$name.vwr" || { echo "::error::$name.vwr was not packaged"; exit 1; }
+            test -f "$d/$name.commit" || { echo "::error::$name.commit build stamp missing"; exit 1; }
+            echo "Build stamp: $(cat "$d/$name.commit")"
+          done
+
+      # Zip each plug-in's flat files (module + resource + build stamp + updater)
+      # into "<name>.vlb.zip". These are both the CI artifacts and the release
+      # assets the Windows updater (vw-update.ps1) fetches.
+      - name: Package modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          foreach ($name in 'SamplePlugin','SamplePluginDev') {
+            $files = @(
+              "build/Release/$name.vlb",
+              "build/Release/$name.vwr",
+              "build/Release/$name.commit",
+              "build/Release/vw-update.ps1"
+            ) | Where-Object { Test-Path $_ }
+            Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force
+          }
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - name: Upload plug-in artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlb-zips
+          path: dist
+
+      # --- Attach the Windows assets to the releases the macOS job published ----
+      - name: Upload Windows asset to stable release (main)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The macOS job (needs: build) already created/refreshed "stable"; add
+          # the Windows asset to it. Retry a few times to ride out transient API
+          # errors, mirroring the resilience of the macOS stable publish.
+          upload() { gh release upload stable "dist/SamplePlugin.vlb.zip" --repo "$GITHUB_REPOSITORY" --clobber; }
+          upload && exit 0 || true
+          for delay in 30 60 120; do
+            echo "upload attempt failed; retrying in ${delay}s..."
+            sleep "$delay"
+            upload && exit 0 || true
+          done
+          echo "::error::Failed to upload the Windows stable asset."
+          exit 1
+
+      - name: Upload Windows asset to dev prerelease (pull requests)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          set -euo pipefail
+          branch="$BRANCH"
+          # Same slug rule as the macOS "Publish dev prerelease" step.
+          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
+          tag="dev-${slug}"
+          # The macOS job publishes the dev prerelease. If the branch was deleted
+          # meanwhile it may not exist (cleanup-dev-release.yml removed it, or the
+          # macOS publish skipped it), so there is nothing to attach to.
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Dev prerelease '$tag' not found; nothing to upload."
+            exit 0
+          fi
+          gh release upload "$tag" "dist/SamplePluginDev.vlb.zip" --repo "$GITHUB_REPOSITORY" --clobber

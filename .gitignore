@@ -2,9 +2,11 @@
 /build/
 /dist/
 *.vwlibrary
+*.vlb
 
 # Local copy of the Vectorworks SDK
 /vw-sdk/
+/vw-sdk-win/
 *-SDK.zip
 
 # macOS

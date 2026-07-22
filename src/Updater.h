@@ -3,10 +3,11 @@
 //
 //	Drives the plug-in's self-update using NATIVE Vectorworks dialogs
 //	(gSDK->AlertInform / gSDK->AlertQuestion). The network + install mechanics
-//	are delegated to the vw-update.sh script bundled inside the .vwlibrary (it
-//	runs non-interactively and prints machine-readable output; see its q-stable
-//	/ q-dev / do-install modes), while every user-facing dialog is shown by the
-//	plug-in itself. So nobody has to open a terminal.
+//	are delegated to a bundled updater script (macOS: vw-update.sh via bash;
+//	Windows: vw-update.ps1 via PowerShell) shipped alongside the installed
+//	plug-in (it runs non-interactively and prints machine-readable output; see
+//	its q-stable / q-dev / do-install modes), while every user-facing dialog is
+//	shown by the plug-in itself. So nobody has to open a terminal.
 //
 //	  * The STABLE plug-in checks for a newer build at Vectorworks start-up:
 //	    RunStableStartupCheck() — silent when already current, otherwise asks
