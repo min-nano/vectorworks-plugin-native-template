@@ -54,8 +54,8 @@ namespace
 	std::string BundledScriptPath()
 	{
 		Dl_info info{};
-		if (::dladdr(reinterpret_cast<const void*>(&BundledScriptPath), &info) == 0
-			|| info.dli_fname == nullptr)
+		if (::dladdr(reinterpret_cast<const void*>(&BundledScriptPath), &info) == 0 ||
+			info.dli_fname == nullptr)
 			return "";
 
 		// .../Contents/MacOS/<name> -> .../Contents/Resources/vw-update.sh
@@ -76,8 +76,8 @@ namespace
 	std::string BundlePluginsDir()
 	{
 		Dl_info info{};
-		if (::dladdr(reinterpret_cast<const void*>(&BundlePluginsDir), &info) == 0
-			|| info.dli_fname == nullptr)
+		if (::dladdr(reinterpret_cast<const void*>(&BundlePluginsDir), &info) == 0 ||
+			info.dli_fname == nullptr)
 			return "";
 
 		// .../<PlugIns>/<name>.vwlibrary/Contents/MacOS/<name> -> .../<PlugIns>
@@ -124,7 +124,8 @@ namespace
 	// of this file, and the script's I/O, are UTF-8).
 	std::wstring Widen(const std::string& s)
 	{
-		if (s.empty()) return L"";
+		if (s.empty())
+			return L"";
 		int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
 		std::wstring w(n, L'\0');
 		::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
@@ -133,8 +134,10 @@ namespace
 
 	std::string Narrow(const std::wstring& w)
 	{
-		if (w.empty()) return "";
-		int n = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+		if (w.empty())
+			return "";
+		int n = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr,
+									  nullptr);
 		std::string s(n, '\0');
 		::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr);
 		return s;
@@ -146,10 +149,10 @@ namespace
 	std::string OwnModulePath()
 	{
 		HMODULE self = nullptr;
-		if (::GetModuleHandleExW(
-				GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-				reinterpret_cast<LPCWSTR>(&OwnModulePath), &self) == 0
-			|| self == nullptr)
+		if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+									 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+								 reinterpret_cast<LPCWSTR>(&OwnModulePath), &self) == 0 ||
+			self == nullptr)
 			return "";
 
 		std::wstring buf(MAX_PATH, L'\0');
@@ -203,8 +206,7 @@ namespace
 		if (!pluginsDir.empty())
 			::SetEnvironmentVariableW(L"VW_PLUGINS_DIR", Widen(pluginsDir).c_str());
 
-		std::string cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File "
-			+ CmdQuote(script);
+		std::string cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File " + CmdQuote(script);
 		for (const std::string& a : args)
 			cmd += " " + CmdQuote(a);
 		cmd += " 2>NUL";
@@ -229,7 +231,7 @@ namespace
 		return true;
 	}
 
-#endif	// GS_WIN
+#endif // GS_WIN
 
 	// The script-output parsing helpers (Trim / ValueOf / DevBuild /
 	// ParseDevBuilds) are SDK-independent and live in UpdaterParse.h so they can
@@ -250,24 +252,29 @@ namespace
 	{
 	public:
 		CBuildPickerDialog(const std::vector<TXString>& items, short initialSel)
-			: fPrompt(kPromptID), fPopup(kPopupID), fItems(items), fSelection(initialSel) {}
+			: fPrompt(kPromptID), fPopup(kPopupID), fItems(items), fSelection(initialSel)
+		{
+		}
 		virtual ~CBuildPickerDialog() {}
 
-		short	GetSelection() const { return fSelection; }
+		short GetSelection() const
+		{
+			return fSelection;
+		}
 
 	protected:
 		// Build the dialog and its controls (called by RunDialogLayout).
 		virtual bool CreateDialogLayout() override
 		{
 			// hasHelp = false -> a plain OK / Cancel dialog, no help button.
-			if (! this->CreateDialog("使用する開発版ビルドを選択", "OK", "キャンセル", false))
+			if (!this->CreateDialog("使用する開発版ビルドを選択", "OK", "キャンセル", false))
 				return false;
-			if (! fPrompt.CreateControl(this, "使用するビルドを選択してください:"))
+			if (!fPrompt.CreateControl(this, "使用するビルドを選択してください:"))
 				return false;
-			if (! fPopup.CreateControl(this, 52 /* width in standard chars */))
+			if (!fPopup.CreateControl(this, 52 /* width in standard chars */))
 				return false;
-			this->AddFirstGroupControl(& fPrompt);
-			this->AddBelowControl(& fPrompt, & fPopup);
+			this->AddFirstGroupControl(&fPrompt);
+			this->AddBelowControl(&fPrompt, &fPopup);
 			return true;
 		}
 
@@ -284,18 +291,22 @@ namespace
 		// Bind the drop-down's selected index to fSelection (both directions).
 		virtual void OnDDXInitialize() override
 		{
-			this->AddDDX_PulldownMenu(kPopupID, & fSelection);
+			this->AddDDX_PulldownMenu(kPopupID, &fSelection);
 		}
 
 		// Required by VWDialog even with no per-control event handlers.
 		DEFINE_EVENT_DISPATH_MAP;
 
 	private:
-		enum { kPromptID = 3, kPopupID = 4 };	// 1 = OK, 2 = Cancel are reserved.
-		VWStaticTextCtrl		fPrompt;
-		VWPullDownMenuCtrl		fPopup;
-		std::vector<TXString>	fItems;
-		short					fSelection;
+		enum
+		{
+			kPromptID = 3,
+			kPopupID = 4
+		}; // 1 = OK, 2 = Cancel are reserved.
+		VWStaticTextCtrl fPrompt;
+		VWPullDownMenuCtrl fPopup;
+		std::vector<TXString> fItems;
+		short fSelection;
 	};
 
 	EVENT_DISPATCH_MAP_BEGIN(CBuildPickerDialog);
@@ -327,16 +338,14 @@ namespace
 		}
 
 		// Yes/no question. Returns true if the user chose the affirmative button.
-		bool Ask(const std::string& text, const std::string& advice,
-				 const std::string& okText, const std::string& cancelText) override
+		bool Ask(const std::string& text, const std::string& advice, const std::string& okText,
+				 const std::string& cancelText) override
 		{
 			// AlertQuestion returns 0 = negative/cancel, 1 = positive/OK, 2/3 =
 			// custom buttons A/B. defaultButton 1 = the OK button is the default.
-			short r = gSDK->AlertQuestion(
-				text.c_str(), advice.c_str(),
-				/*defaultButton*/ 1,
-				okText.c_str(), cancelText.c_str(),
-				/*customButtonA*/ "", /*customButtonB*/ "");
+			short r = gSDK->AlertQuestion(text.c_str(), advice.c_str(),
+										  /*defaultButton*/ 1, okText.c_str(), cancelText.c_str(),
+										  /*customButtonA*/ "", /*customButtonB*/ "");
 			return r == 1;
 		}
 
@@ -350,11 +359,11 @@ namespace
 
 			CBuildPickerDialog dlg(txItems, static_cast<short>(initialSel));
 			if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
-				return -1;						// cancelled -> keep the loaded build
+				return -1; // cancelled -> keep the loaded build
 			return dlg.GetSelection();
 		}
 	};
-}
+} // namespace
 
 namespace SamplePlugin
 {
@@ -390,4 +399,4 @@ namespace SamplePlugin
 		CVectorworksUpdaterHost host;
 		RunDevStartupCheckWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION);
 	}
-}
+} // namespace SamplePlugin

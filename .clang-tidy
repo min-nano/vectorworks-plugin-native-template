@@ -1,0 +1,57 @@
+# clang-tidy configuration for the Vectorworks plug-in template.
+#
+# Runs the static-analysis and lint checks that are meaningful for this code
+# base without drowning it in style noise that clang-format already owns.
+#
+# CI runs clang-tidy over the SDK-free translation units (the updater logic and
+# its tests) using the compile database from a `-DVW_BUILD_PLUGIN=OFF
+# -DVW_BUILD_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configure. Locally you
+# can do the same and run:
+#     clang-tidy -p build src/UpdaterFlow.cpp
+#
+# Notable disabled checks and why:
+#   * modernize-use-trailing-return-type — pure style, fights the house style.
+#   * readability-identifier-length      — short loop vars (i, n, s) are fine.
+#   * *-magic-numbers                     — noisy for parsing/index code.
+#   * llvmlibc-*, fuchsia-*, altera-*, abseil-* — vendor rules, not relevant.
+#   * cppcoreguidelines checks that duplicate bugprone or demand a large,
+#     unrelated refactor (owning-memory, pointer arithmetic, macro usage).
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  modernize-*,
+  readability-*,
+  misc-*,
+  cppcoreguidelines-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-braces-around-statements,
+  -readability-implicit-bool-conversion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-include-cleaner,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-macro-usage,
+  -bugprone-easily-swappable-parameters
+
+# Treat every enabled diagnostic as an error so CI fails on any regression.
+WarningsAsErrors: "*"
+
+# Only diagnose the project's own headers (src/ and tests/), never the SDK or
+# system/toolchain headers.
+HeaderFilterRegex: "(src|tests)/"
+
+FormatStyle: file

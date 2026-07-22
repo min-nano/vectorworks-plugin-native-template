@@ -2,6 +2,7 @@
 /build/
 /build-tests/
 /buildcov/
+/build-lint/
 /dist/
 *.vwlibrary
 *.vlb
