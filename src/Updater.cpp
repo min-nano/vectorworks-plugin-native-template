@@ -111,7 +111,7 @@ namespace
 			return false;
 
 		out.clear();
-		std::array<char, 4096> buf;
+		std::array<char, 4096> buf{};
 		size_t n = 0;
 		while ((n = ::fread(buf.data(), 1, buf.size(), pipe)) > 0)
 			out.append(buf.data(), n);
@@ -221,7 +221,7 @@ namespace
 		}
 
 		out.clear();
-		std::array<char, 4096> buf;
+		std::array<char, 4096> buf{};
 		size_t n = 0;
 		while ((n = ::fread(buf.data(), 1, buf.size(), pipe)) > 0)
 			out.append(buf.data(), n);

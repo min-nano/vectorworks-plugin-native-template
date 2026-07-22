@@ -345,12 +345,18 @@ jobs:
         with:
           arch: x64
 
-      - name: Install LLVM 18 + Ninja (for clang-tidy)
+      - name: Install LLVM + Ninja (for clang-tidy)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           choco install --no-progress -y ninja
-          choco install --no-progress -y llvm --version=18.1.8 --allow-downgrade
+          # Install the LATEST LLVM rather than pinning a version: the runner's
+          # MSVC standard-library headers static_assert "expected Clang 20 or
+          # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be new
+          # enough to parse them. (macOS pins llvm@18 because AppleClang + libc++
+          # there impose no such requirement.) Bump the runner's MSVC and this
+          # both track "latest", so they stay compatible.
+          choco install --no-progress -y llvm
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Configure compile database (Ninja + clang-cl, no build)
