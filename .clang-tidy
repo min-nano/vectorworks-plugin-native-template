@@ -16,6 +16,21 @@
 #   * llvmlibc-*, fuchsia-*, altera-*, abseil-* — vendor rules, not relevant.
 #   * cppcoreguidelines checks that duplicate bugprone or demand a large,
 #     unrelated refactor (owning-memory, pointer arithmetic, macro usage).
+#
+# Disabled because they conflict with the Vectorworks SDK rather than our code
+# (they fire only inside SDK macros / on SDK-mandated patterns, so no amount of
+# editing the plug-in sources can satisfy them):
+#   * cppcoreguidelines-special-member-functions — every SDK-derived class
+#     (VWDialog, VWMenu_EventSink, …) has a virtual destructor and is not meant
+#     to be copied; demanding the rule of five on each is pure boilerplate.
+#   * cppcoreguidelines-avoid-non-const-global-variables — the SDK's menu
+#     definition (SMenuDef) and the test registrars are legitimately globals.
+#   * cppcoreguidelines-pro-type-cstyle-cast — the SDK event-map macros and the
+#     Win32 glue use C-style casts; not ours to change.
+#   * clang-diagnostic-inconsistent-missing-override — the SDK's
+#     DEFINE_EVENT_DISPATH_MAP macro declares a virtual without `override`.
+#   * performance-enum-size — the dialog control-id enum interfaces with SDK
+#     APIs that expect the default int width; shrinking it buys nothing.
 Checks: >
   clang-analyzer-*,
   bugprone-*,
@@ -45,6 +60,11 @@ Checks: >
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-avoid-do-while,
   -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-special-member-functions,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -performance-enum-size,
+  -clang-diagnostic-inconsistent-missing-override,
   -bugprone-easily-swappable-parameters
 
 # Treat every enabled diagnostic as an error so CI fails on any regression.

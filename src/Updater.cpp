@@ -19,6 +19,7 @@
 #include "UpdaterHost.h"
 #include "UpdaterParse.h"
 
+#include <array>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -88,7 +89,7 @@ namespace
 	// script finishes. Returns false if the script could not be located/started.
 	bool RunBundledScript(const std::vector<std::string>& args, std::string& out)
 	{
-		std::string script = BundledScriptPath();
+		const std::string script = BundledScriptPath();
 		if (script.empty())
 			return false;
 
@@ -96,7 +97,7 @@ namespace
 		// it reads the installed commit from — and installs over — the copy
 		// Vectorworks really uses (not a guessed default path).
 		std::string env;
-		std::string pluginsDir = BundlePluginsDir();
+		const std::string pluginsDir = BundlePluginsDir();
 		if (!pluginsDir.empty())
 			env = "VW_PLUGINS_DIR=" + ShellQuote(pluginsDir) + " ";
 
@@ -110,10 +111,10 @@ namespace
 			return false;
 
 		out.clear();
-		char buf[4096];
+		std::array<char, 4096> buf;
 		size_t n = 0;
-		while ((n = ::fread(buf, 1, sizeof(buf), pipe)) > 0)
-			out.append(buf, n);
+		while ((n = ::fread(buf.data(), 1, buf.size(), pipe)) > 0)
+			out.append(buf.data(), n);
 		::pclose(pipe);
 		return true;
 	}
@@ -126,9 +127,9 @@ namespace
 	{
 		if (s.empty())
 			return L"";
-		int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+		const int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
 		std::wstring w(n, L'\0');
-		::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+		::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), w.data(), n);
 		return w;
 	}
 
@@ -136,10 +137,10 @@ namespace
 	{
 		if (w.empty())
 			return "";
-		int n = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr,
-									  nullptr);
+		const int n = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0,
+											nullptr, nullptr);
 		std::string s(n, '\0');
-		::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr);
+		::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), s.data(), n, nullptr, nullptr);
 		return s;
 	}
 
@@ -156,12 +157,12 @@ namespace
 			return "";
 
 		std::wstring buf(MAX_PATH, L'\0');
-		DWORD len = ::GetModuleFileNameW(self, &buf[0], (DWORD)buf.size());
+		DWORD len = ::GetModuleFileNameW(self, buf.data(), (DWORD)buf.size());
 		// Grow once if the path was longer than MAX_PATH.
 		while (len == buf.size())
 		{
 			buf.resize(buf.size() * 2, L'\0');
-			len = ::GetModuleFileNameW(self, &buf[0], (DWORD)buf.size());
+			len = ::GetModuleFileNameW(self, buf.data(), (DWORD)buf.size());
 		}
 		if (len == 0)
 			return "";
@@ -194,7 +195,7 @@ namespace
 	// Blocks until the script finishes. Returns false if it could not be started.
 	bool RunBundledScript(const std::vector<std::string>& args, std::string& out)
 	{
-		std::string script = BundledScriptPath();
+		const std::string script = BundledScriptPath();
 		if (script.empty())
 			return false;
 
@@ -202,7 +203,7 @@ namespace
 		// it reads the installed commit from — and installs over — the copy
 		// Vectorworks really uses (not a guessed default path). The child
 		// PowerShell inherits this process environment.
-		std::string pluginsDir = BundlePluginsDir();
+		const std::string pluginsDir = BundlePluginsDir();
 		if (!pluginsDir.empty())
 			::SetEnvironmentVariableW(L"VW_PLUGINS_DIR", Widen(pluginsDir).c_str());
 
@@ -220,10 +221,10 @@ namespace
 		}
 
 		out.clear();
-		char buf[4096];
+		std::array<char, 4096> buf;
 		size_t n = 0;
-		while ((n = ::fread(buf, 1, sizeof(buf), pipe)) > 0)
-			out.append(buf, n);
+		while ((n = ::fread(buf.data(), 1, buf.size(), pipe)) > 0)
+			out.append(buf.data(), n);
 		::_pclose(pipe);
 
 		if (!pluginsDir.empty())
@@ -255,7 +256,7 @@ namespace
 			: fPrompt(kPromptID), fPopup(kPopupID), fItems(items), fSelection(initialSel)
 		{
 		}
-		virtual ~CBuildPickerDialog() {}
+		~CBuildPickerDialog() override = default;
 
 		short GetSelection() const
 		{
@@ -264,7 +265,7 @@ namespace
 
 	protected:
 		// Build the dialog and its controls (called by RunDialogLayout).
-		virtual bool CreateDialogLayout() override
+		bool CreateDialogLayout() override
 		{
 			// hasHelp = false -> a plain OK / Cancel dialog, no help button.
 			if (!this->CreateDialog("使用する開発版ビルドを選択", "OK", "キャンセル", false))
@@ -279,7 +280,7 @@ namespace
 		}
 
 		// Fill the drop-down and preselect the initial item (control now exists).
-		virtual void OnInitializeContent() override
+		void OnInitializeContent() override
 		{
 			VWDialog::OnInitializeContent();
 			for (const TXString& item : fItems)
@@ -289,7 +290,7 @@ namespace
 		}
 
 		// Bind the drop-down's selected index to fSelection (both directions).
-		virtual void OnDDXInitialize() override
+		void OnDDXInitialize() override
 		{
 			this->AddDDX_PulldownMenu(kPopupID, &fSelection);
 		}
@@ -309,6 +310,9 @@ namespace
 		short fSelection;
 	};
 
+	// EVENT_DISPATCH_MAP_BEGIN is an SDK macro; its expansion declares a local the
+	// check would want const — the macro's code, not ours.
+	// NOLINTNEXTLINE(misc-const-correctness)
 	EVENT_DISPATCH_MAP_BEGIN(CBuildPickerDialog);
 	EVENT_DISPATCH_MAP_END;
 
@@ -343,9 +347,10 @@ namespace
 		{
 			// AlertQuestion returns 0 = negative/cancel, 1 = positive/OK, 2/3 =
 			// custom buttons A/B. defaultButton 1 = the OK button is the default.
-			short r = gSDK->AlertQuestion(text.c_str(), advice.c_str(),
-										  /*defaultButton*/ 1, okText.c_str(), cancelText.c_str(),
-										  /*customButtonA*/ "", /*customButtonB*/ "");
+			const short r =
+				gSDK->AlertQuestion(text.c_str(), advice.c_str(),
+									/*defaultButton*/ 1, okText.c_str(), cancelText.c_str(),
+									/*customButtonA*/ "", /*customButtonB*/ "");
 			return r == 1;
 		}
 
@@ -354,8 +359,9 @@ namespace
 		int PickBuild(const std::vector<std::string>& items, int initialSel) override
 		{
 			std::vector<TXString> txItems;
+			txItems.reserve(items.size());
 			for (const std::string& s : items)
-				txItems.push_back(TXString(s.c_str()));
+				txItems.emplace_back(s.c_str());
 
 			CBuildPickerDialog dlg(txItems, static_cast<short>(initialSel));
 			if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)

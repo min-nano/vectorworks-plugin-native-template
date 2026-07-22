@@ -374,7 +374,13 @@ jobs:
           set -euo pipefail
           tidy="/c/Program Files/LLVM/bin/clang-tidy"
           "$tidy" --version
+          # clang-tidy forces -fno-delayed-template-parsing to get a full AST, but
+          # the Vectorworks SDK's MSVC-oriented template headers (e.g. VWVariant.h
+          # calling ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
+          # -fdelayed-template-parsing so those SDK templates parse as they do in
+          # the real MSVC build; our own (non-template) code is still analyzed.
           "$tidy" -p build-tidy --warnings-as-errors='*' \
+            --extra-arg=-fdelayed-template-parsing \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \

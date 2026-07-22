@@ -19,9 +19,9 @@ namespace SamplePlugin
 	{
 	public:
 		CSampleMenu_EventSink(IVWUnknown* parent);
-		virtual ~CSampleMenu_EventSink();
+		~CSampleMenu_EventSink() override;
 
-		virtual void DoInterface() override;
+		void DoInterface() override;
 	};
 
 	// ------------------------------------------------------------------------
@@ -32,6 +32,6 @@ namespace SamplePlugin
 
 	public:
 		CExtMenuSample(CallBackPtr cbp);
-		virtual ~CExtMenuSample();
+		~CExtMenuSample() override;
 	};
 } // namespace SamplePlugin

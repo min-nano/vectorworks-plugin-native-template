@@ -31,15 +31,7 @@ namespace SamplePlugin
 	// would otherwise touch the SDK / the OS.
 	struct IUpdaterHost
 	{
-		IUpdaterHost() = default;
 		virtual ~IUpdaterHost() = default;
-
-		// Polymorphic base: copying/moving through it would slice, so the
-		// special members are deleted (rule of five, made explicit).
-		IUpdaterHost(const IUpdaterHost&) = delete;
-		IUpdaterHost& operator=(const IUpdaterHost&) = delete;
-		IUpdaterHost(IUpdaterHost&&) = delete;
-		IUpdaterHost& operator=(IUpdaterHost&&) = delete;
 
 		// Run the bundled updater script with the given args and capture its
 		// stdout into `out`. Returns false if the script could not be started
