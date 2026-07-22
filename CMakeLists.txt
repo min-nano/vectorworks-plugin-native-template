@@ -86,6 +86,18 @@ if(APPLE)
 	# BuildVWR packages resources/<name>.vwr into the bundle.
 	set(VW_BUILDVWR "${VW_SDK_DIR}/SDKLib/ToolsMac/BuildVWR/BuildVWR")
 else()
+	# Windows is x64-only. The SDK ships only x64 libraries (LibWin holds an
+	# x64 VWSDK.lib / VWMM.lib — there is no ARM64 variant), and Vectorworks for
+	# Windows itself is an x64 application. A plug-in DLL must match the host
+	# process, so x64 is the only valid target — build with -A x64. This still
+	# runs on Windows-on-ARM: there the x64 Vectorworks runs under the OS's x64
+	# emulation and loads this x64 plug-in as-is (a native ARM64 plug-in could
+	# not load into that emulated x64 host, and could not be linked anyway).
+	if(CMAKE_GENERATOR_PLATFORM AND NOT CMAKE_GENERATOR_PLATFORM MATCHES "^([xX]64|Win32)$")
+		message(WARNING
+			"Building for platform '${CMAKE_GENERATOR_PLATFORM}', but the "
+			"Vectorworks SDK provides x64 libraries only. Configure with -A x64.")
+	endif()
 	set(VW_SDK_LIB "${VW_SDK_DIR}/SDKLib/LibWin/Release")
 	if(NOT EXISTS "${VW_SDK_LIB}/VWSDK.lib")
 		message(FATAL_ERROR "Could not find VWSDK.lib under '${VW_SDK_LIB}'.")
