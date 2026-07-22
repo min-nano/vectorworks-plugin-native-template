@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-mac:
     # Apple Silicon runner (macos-14 and macos-15 are arm64).
     runs-on: macos-15
 
