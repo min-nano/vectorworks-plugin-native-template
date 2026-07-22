@@ -31,7 +31,13 @@ scripts/
   vw-update.sh              CI ビルドをダウンロード／インストールする（macOS 用。
                             バンドルに同梱され、プラグインから起動される）
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
+  lint.sh                   ローカルで clang-format / clang-tidy を実行する
+                            （CI と同じチェック。--fix で自動修正）
+.clang-format               コードフォーマット規則（タブ・Allman ブレース等）
+.clang-tidy                 静的解析チェックの設定（WarningsAsErrors）
+.editorconfig              エディタ側のインデント／改行／文字コード規則
 .github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドする
+.github/workflows/lint.yml  CI: clang-format / clang-tidy でコーディング規則を強制
 ```
 
 同じソースから、1 つのスイッチ（`VW_DEV_BUILD`、`src/BuildConfig.h` を参照）で
@@ -301,6 +307,75 @@ gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-su
 場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
 して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
 デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+
+## コーディング規則の強制（Lint）
+
+`.github/workflows/lint.yml` が、`main` への push とすべての PR で C++ の
+コーディング規則を機械的に強制します。原因を切り分けやすいよう 2 ジョブに
+分かれています。
+
+- **`clang-format`** — `src/` と `tests/` の**すべての** C/C++ ソースを
+  `.clang-format` に照らしてチェックします。`--dry-run --Werror` なので 1 か所
+  でも規則から外れると失敗し、書き換えは行いません。SDK もビルドも不要なので
+  高速で、SDK が要る（`#if GS_MAC` / `GS_WIN`）プラットフォーム固有のグルー
+  コードも含めて**全ファイル**を対象にできます。
+- **`clang-tidy`** — SDK 非依存のアップデータロジック（`src/UpdaterFlow.cpp` と
+  それが取り込む `UpdaterParse.h` / `UpdaterHost.h`）に対して静的解析を行います。
+  clang-tidy は翻訳単位を実際にコンパイルする必要があり、SDK が不要なこの Linux
+  ランナー上では**実ロジックを持つ SDK 非依存コード**を対象にします。`.clang-tidy`
+  は `WarningsAsErrors: "*"` なので、検出があれば CI が失敗します。
+
+**SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
+ないとコンパイルできないプラグイン本体（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp`
+/ `Updater.cpp`）にも適用します。ビルドジョブは SDK を用意するので、**ビルド直前**に
+clang-tidy を走らせて全ソースを網羅します。
+
+- **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
+  database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
+- **Windows ジョブ** — Visual Studio ジェネレータは compile database を出力しない
+  ため、解析専用に **Ninja + clang-cl** でビルドせずに再コンフィグして database を
+  生成し、`#if GS_WIN` 側の分岐（`Updater.cpp` の `Widen` / `Narrow` /
+  `OwnModulePath` / `RunBundledScript`）を解析します。
+
+macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
+**すべての行**が clang-tidy でチェックされます。
+
+バージョンについて: SDK 非依存の `lint.yml` と macOS ジョブは clang 18 に固定して
+います。Windows ジョブだけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
+ヘッダが「Clang 20 以降」を要求する（`static_assert` と Clang 20 の組み込み関数を使う）
+ため、clang-cl / clang-tidy がそれを解析できる新しさである必要があるからです。
+
+**採用しているルール:**
+
+- フォーマット（`.clang-format`）— タブインデント（幅 4）、Allman ブレース
+  （`{` を次行に置く）、名前空間本体をインデント、ポインタ／参照は型側に寄せる
+  （`int* p`）、コード幅 100 桁で折り返し。コメントは再整形しません
+  （`ReflowComments: false`）— 手作業で整形された重厚なコメント（日本語・罫線を
+  含む）を壊さないためです。
+- 静的解析（`.clang-tidy`）— `bugprone-*`、`performance-*`、`modernize-*`、
+  `readability-*`、`cppcoreguidelines-*`、`clang-analyzer-*` を有効化し、
+  スタイル系のノイズ（フォーマットは clang-format が担当）や大規模な無関係リ
+  ファクタを要求するチェックは無効化しています。
+
+**ローカルでの実行**（CI と同じチェック）:
+
+```bash
+scripts/lint.sh          # チェックのみ（違反があれば非ゼロ終了）
+scripts/lint.sh --fix    # その場で自動修正（clang-format -i と clang-tidy --fix）
+```
+
+`.editorconfig` も用意してあり、多くのエディタがインデント・改行・文字コードを
+保存時に合わせるので、CI に到達する前から規則に近い状態を保てます。
+
+> **さらに強化するには（任意）:** よりよいツールとして、CMake の整形に
+> [`cmake-format`](https://github.com/cheshirekow/cmake_format)、ワークフロー
+> YAML の検証に [`actionlint`](https://github.com/rhysd/actionlint)、コミット前の
+> 自動実行に [`pre-commit`](https://pre-commit.com/)、追加の静的解析に
+> [`cppcheck`](https://cppcheck.sourceforge.io/) を組み合わせられます。SDK 依存の
+> プラグイン本体（`Updater.cpp` など）は CI（`build.yml`）で clang-tidy を掛けて
+> いますが、ローカルで掛けたい場合は SDK を用意したうえで
+> `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` でコンフィグし、生成された
+> `compile_commands.json` に対して `clang-tidy` を実行してください。
 
 ## SDK ドキュメント（API 仕様）
 

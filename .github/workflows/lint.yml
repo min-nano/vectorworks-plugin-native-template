@@ -1,0 +1,100 @@
+name: Lint
+
+# Enforces the C++ coding rules on every push to main and every pull request.
+# Two independent jobs so a red X points straight at the cause:
+#
+#   * clang-format — style/formatting for ALL C/C++ sources (src/ + tests/).
+#                    Needs no SDK and no build, so it is fast and complete: it
+#                    checks every file, including the platform-specific plug-in
+#                    glue that only compiles against the Vectorworks SDK.
+#   * clang-tidy   — static analysis (bug-prone patterns, const-correctness,
+#                    modernize, core-guidelines) over the SDK-FREE updater logic
+#                    and its headers. clang-tidy has to actually compile a
+#                    translation unit, and the plug-in glue (#if GS_MAC/GS_WIN)
+#                    needs the SDK, so on this SDK-free Linux runner it lints the
+#                    code that carries the real logic and unit tests. The rest
+#                    is still covered by clang-format above; to tidy the plug-in
+#                    glue too, run clang-tidy locally against an SDK build.
+#
+# Both tools are pinned to the same major version (18) so results are stable and
+# match what `.clang-format` / `.clang-tidy` were tuned against. Reproduce
+# locally:
+#     clang-format-18 --dry-run --Werror src/*.cpp src/**/*.h tests/*
+#     cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON \
+#           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+#     clang-tidy-18 -p build src/UpdaterFlow.cpp
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One lint run per ref; a new push cancels an in-flight run for that ref.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CLANG_VERSION: "18"
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "clang-format-${CLANG_VERSION}"
+
+      # Check every C/C++ source in the repo. --Werror makes any deviation a
+      # failure; --dry-run means nothing is written. The exact offending lines
+      # are printed so the fix is obvious (run clang-format -i locally).
+      - name: Check formatting
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find src tests \
+            \( -name '*.cpp' -o -name '*.h' \) ! -name '*.plist.in' | sort)
+          echo "Checking ${#files[@]} files with clang-format-${CLANG_VERSION}:"
+          printf '  %s\n' "${files[@]}"
+          "clang-format-${CLANG_VERSION}" --dry-run --Werror "${files[@]}"
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools + clang-tidy
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ "clang-tidy-${CLANG_VERSION}"
+
+      # Configure the SDK-free build purely to emit compile_commands.json, which
+      # tells clang-tidy exactly how each translation unit is compiled (flags,
+      # include paths, C++ standard). No build step is needed for linting.
+      - name: Configure (compile database, no SDK)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      # Lint the SDK-free updater logic (src/UpdaterFlow.cpp pulls in
+      # UpdaterParse.h and UpdaterHost.h, all covered via HeaderFilterRegex in
+      # .clang-tidy). WarningsAsErrors in the config makes any finding fail CI.
+      - name: Run clang-tidy
+        run: |
+          set -euo pipefail
+          "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' \
+            src/UpdaterFlow.cpp
