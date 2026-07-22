@@ -52,7 +52,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Build the resolved commit (PR head, or the pushed/ dispatched sha).
           ref: ${{ steps.ctx.outputs.sha }}
@@ -66,7 +66,7 @@ jobs:
       # SDKLib/LibMac are kept, so the cache is a few tens of MB rather than 800.
       - name: Restore Vectorworks SDK cache
         id: sdk-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
@@ -183,7 +183,7 @@ jobs:
           ls -l dist
 
       - name: Upload plug-in artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vwlibrary-zips
           path: dist
@@ -328,7 +328,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.ctx.outputs.sha }}
 
@@ -336,7 +336,7 @@ jobs:
       # to build a Windows plug-in are kept, so the cache is small.
       - name: Restore Vectorworks SDK cache
         id: sdk-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
@@ -444,7 +444,7 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
 
       - name: Upload plug-in artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vlb-zips
           path: dist
