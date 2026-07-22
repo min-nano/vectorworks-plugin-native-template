@@ -188,116 +188,13 @@ jobs:
           name: vwlibrary-zips
           path: dist
 
-      # --- Publish a downloadable release --------------------------------------
-      # main  -> refresh the rolling "stable" release with the SamplePlugin bundle.
-      # other -> refresh a per-branch "dev-<branch>" prerelease with SamplePluginDev.
-      # Rolling tags are deleted and recreated so they always point at this build.
-      - name: Publish stable release (main)
-        # Runs on a push to main, and on a manual/scheduled re-dispatch of this
-        # workflow on main (the health-check workflow uses that to republish a
-        # stable release that was missed — see stable-release-healthcheck.yml).
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
-          SHORT: ${{ steps.ctx.outputs.short }}
-        run: |
-          set -euo pipefail
-          short="$SHORT"
-          cat > notes.txt <<EOF
-          channel=stable
-          branch=main
-          commit=${BUILD_SHA}
-          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-          # Delete + recreate as one unit. A missed stable release can go
-          # unnoticed, so retry with a long backoff to ride out an extended
-          # GitHub API outage. If every attempt still fails, the scheduled
-          # stable-release-healthcheck.yml notices the drift and re-dispatches
-          # this build to republish.
-          publish() {
-            gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-            gh release create stable "dist/SamplePlugin.vwlibrary.zip" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$BUILD_SHA" \
-              --title "Stable (${short})" \
-              --notes-file notes.txt \
-              --latest
-          }
-          publish && exit 0 || true
-          attempts=1
-          for delay in 30 60 120 300 600; do
-            echo "publish attempt $attempts failed; retrying in ${delay}s..."
-            sleep "$delay"
-            attempts=$((attempts + 1))
-            publish && exit 0 || true
-          done
-          echo "::error::Failed to publish the stable release after $attempts attempts."
-          exit 1
-
-      - name: Publish dev prerelease (pull requests)
-        # Feature branches are built via their pull request. Skip PRs from forks:
-        # their GITHUB_TOKEN is read-only and cannot publish a release.
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
-          SHORT: ${{ steps.ctx.outputs.short }}
-          BRANCH: ${{ steps.ctx.outputs.ref }}
-        run: |
-          set -euo pipefail
-          short="$SHORT"
-          branch="$BRANCH"
-          # Sanitize the branch name into a tag-safe slug.
-          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
-          tag="dev-${slug}"
-          cat > notes.txt <<EOF
-          channel=dev
-          branch=${branch}
-          commit=${BUILD_SHA}
-          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-          # Guard against a delete/publish race. The branch may have been
-          # deleted after the PR was opened but before this (slow) build
-          # finished. If so, cleanup-dev-release.yml has already run and found
-          # no prerelease to delete (this job had not published one yet), so
-          # creating one now would orphan it forever. Skip publishing when the
-          # branch no longer exists.
-          branch_exists() {
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1
-          }
-          if ! branch_exists; then
-            echo "Branch '$branch' no longer exists; skipping dev prerelease publish to avoid orphaning it."
-            exit 0
-          fi
-          # Dev builds are only used while actively working on a branch, so no
-          # retry: if a transient GitHub API error fails this, just re-run the
-          # job manually. (The stable release, which could go unnoticed, does
-          # retry and has a scheduled health check.)
-          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-          gh release create "$tag" "dist/SamplePluginDev.vwlibrary.zip" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$BUILD_SHA" \
-            --title "Dev: ${branch} (${short})" \
-            --notes-file notes.txt \
-            --prerelease
-          # Close the narrow window where the branch is deleted between the
-          # check above and now: if cleanup ran during publish, it may have
-          # missed the release. Re-check and clean up our own release if so.
-          if ! branch_exists; then
-            echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
-            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-          fi
-
   # ---------------------------------------------------------------------------
   # Windows build. Produces the ".vlb" module (a DLL) plus its sibling ".vwr"
   # resource, the "<name>.commit" build stamp and the PowerShell updater, zipped
   # per plug-in. Runs in PARALLEL with the macOS job (build-mac) so the two
-  # platforms build concurrently instead of one after the other. The macOS job
-  # is still the one that creates the rolling "stable" / "dev-<branch>" releases;
-  # this job just attaches its Windows assets to them. Because the two jobs race,
-  # the upload steps below wait for the release to appear rather than assuming it
-  # already exists.
+  # platforms build concurrently instead of one after the other. Publishing the
+  # releases is deferred to the separate "release" job, which runs once both
+  # builds have finished — this job just produces and uploads its artifacts.
   build-windows:
     runs-on: windows-latest
 
@@ -451,60 +348,152 @@ jobs:
           name: vlb-zips
           path: dist
 
-      # --- Attach the Windows assets to the releases the macOS job published ----
-      - name: Upload Windows asset to stable release (main)
+  # ---------------------------------------------------------------------------
+  # Publish the downloadable release. Runs only after BOTH platform builds have
+  # finished (needs: [build-mac, build-windows]) so a single release carries the
+  # macOS (.vwlibrary.zip) and Windows (.vlb.zip) assets together. Splitting this
+  # out of the build jobs means neither platform publishes on its own, so there
+  # is no create/attach race between them:
+  #   main  -> refresh the rolling "stable" release with the SamplePlugin bundle.
+  #   other -> refresh a per-branch "dev-<branch>" prerelease with SamplePluginDev.
+  # Rolling tags are deleted and recreated so they always point at this build.
+  release:
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      # Same commit/ref resolution as the build jobs (PR head, or pushed sha).
+      - name: Resolve build context
+        id: ctx
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            sha="${{ github.event.pull_request.head.sha }}"
+            ref="${{ github.head_ref }}"
+          else
+            sha="${{ github.sha }}"
+            ref="${{ github.ref_name }}"
+          fi
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      # Pull both build jobs' zips into a single dist/ folder. The macOS job
+      # uploaded the ".vwlibrary.zip" bundles; the Windows job the ".vlb.zip"
+      # modules. After both downloads dist/ holds all four assets.
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: vwlibrary-zips
+          path: dist
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: vlb-zips
+          path: dist
+
+      - name: List downloaded assets
+        run: ls -l dist
+
+      - name: Publish stable release (main)
+        # Runs on a push to main, and on a manual/scheduled re-dispatch of this
+        # workflow on main (the health-check workflow uses that to republish a
+        # stable release that was missed — see stable-release-healthcheck.yml).
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          SHORT: ${{ steps.ctx.outputs.short }}
         run: |
           set -euo pipefail
-          # This job now runs in parallel with the macOS job (build-mac), which is
-          # the one that creates/refreshes the "stable" release. Wait for that
-          # release to appear before attaching the Windows asset. The long backoff
-          # covers both the macOS job still building and transient API errors, and
-          # mirrors the resilience of the macOS stable publish.
-          upload() { gh release upload stable "dist/SamplePlugin.vlb.zip" --repo "$GITHUB_REPOSITORY" --clobber; }
-          upload && exit 0 || true
-          for delay in 15 30 30 60 60 120 120 300 300; do
-            echo "stable release not ready yet; retrying in ${delay}s..."
+          short="$SHORT"
+          cat > notes.txt <<EOF
+          channel=stable
+          branch=main
+          commit=${BUILD_SHA}
+          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          # Delete + recreate as one unit, attaching both platform assets at once.
+          # A missed stable release can go unnoticed, so retry with a long backoff
+          # to ride out an extended GitHub API outage. If every attempt still
+          # fails, the scheduled stable-release-healthcheck.yml notices the drift
+          # and re-dispatches this build to republish.
+          publish() {
+            gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+            gh release create stable \
+              "dist/SamplePlugin.vwlibrary.zip" \
+              "dist/SamplePlugin.vlb.zip" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$BUILD_SHA" \
+              --title "Stable (${short})" \
+              --notes-file notes.txt \
+              --latest
+          }
+          publish && exit 0 || true
+          attempts=1
+          for delay in 30 60 120 300 600; do
+            echo "publish attempt $attempts failed; retrying in ${delay}s..."
             sleep "$delay"
-            upload && exit 0 || true
+            attempts=$((attempts + 1))
+            publish && exit 0 || true
           done
-          echo "::error::Failed to upload the Windows stable asset."
+          echo "::error::Failed to publish the stable release after $attempts attempts."
           exit 1
 
-      - name: Upload Windows asset to dev prerelease (pull requests)
+      - name: Publish dev prerelease (pull requests)
+        # Feature branches are built via their pull request. Skip PRs from forks:
+        # their GITHUB_TOKEN is read-only and cannot publish a release.
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          SHORT: ${{ steps.ctx.outputs.short }}
           BRANCH: ${{ steps.ctx.outputs.ref }}
         run: |
           set -euo pipefail
+          short="$SHORT"
           branch="$BRANCH"
-          # Same slug rule as the macOS "Publish dev prerelease" step.
+          # Sanitize the branch name into a tag-safe slug.
           slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
           tag="dev-${slug}"
-          # The macOS job (build-mac) publishes the dev prerelease, and now runs
-          # in parallel with this one, so the release may not exist yet simply
-          # because that job is still building. Wait for it to appear before
-          # uploading. If it never shows up within the window, there is nothing
-          # to attach to — either the macOS publish skipped it or
-          # cleanup-dev-release.yml removed it because the branch was deleted —
-          # so skip rather than fail.
-          release_exists() {
-            gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          cat > notes.txt <<EOF
+          channel=dev
+          branch=${branch}
+          commit=${BUILD_SHA}
+          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          # Guard against a delete/publish race. The branch may have been
+          # deleted after the PR was opened but before this (slow) build
+          # finished. If so, cleanup-dev-release.yml has already run and found
+          # no prerelease to delete (this job had not published one yet), so
+          # creating one now would orphan it forever. Skip publishing when the
+          # branch no longer exists.
+          branch_exists() {
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1
           }
-          if ! release_exists; then
-            for delay in 15 30 30 60 60 120 120 300 300; do
-              echo "Dev prerelease '$tag' not ready yet; waiting ${delay}s..."
-              sleep "$delay"
-              release_exists && break
-            done
-          fi
-          if ! release_exists; then
-            echo "Dev prerelease '$tag' not found; nothing to upload."
+          if ! branch_exists; then
+            echo "Branch '$branch' no longer exists; skipping dev prerelease publish to avoid orphaning it."
             exit 0
           fi
-          gh release upload "$tag" "dist/SamplePluginDev.vlb.zip" --repo "$GITHUB_REPOSITORY" --clobber
+          # Dev builds are only used while actively working on a branch, so no
+          # retry: if a transient GitHub API error fails this, just re-run the
+          # job manually. (The stable release, which could go unnoticed, does
+          # retry and has a scheduled health check.)
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$tag" \
+            "dist/SamplePluginDev.vwlibrary.zip" \
+            "dist/SamplePluginDev.vlb.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$BUILD_SHA" \
+            --title "Dev: ${branch} (${short})" \
+            --notes-file notes.txt \
+            --prerelease
+          # Close the narrow window where the branch is deleted between the
+          # check above and now: if cleanup ran during publish, it may have
+          # missed the release. Re-check and clean up our own release if so.
+          if ! branch_exists; then
+            echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          fi
