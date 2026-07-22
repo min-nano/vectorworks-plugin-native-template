@@ -16,6 +16,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Updater.h"
+#include "UpdaterHost.h"
 #include "UpdaterParse.h"
 
 #include <cstdio>
@@ -38,7 +39,7 @@ namespace
 	// the same three primitives:
 	//   BundledScriptPath()  absolute path of the updater script we ship, or "".
 	//   BundlePluginsDir()   the Plug-Ins folder this build was loaded from, or "".
-	//   RunScript(args, out) run the script with args, capture stdout.
+	//   RunBundledScript(args, out) run the script with args, capture stdout.
 	// -----------------------------------------------------------------------
 
 #if GS_MAC
@@ -85,7 +86,7 @@ namespace
 
 	// Run "vw-update.sh <args>" and capture its stdout into out. Blocks until the
 	// script finishes. Returns false if the script could not be located/started.
-	bool RunScript(const std::vector<std::string>& args, std::string& out)
+	bool RunBundledScript(const std::vector<std::string>& args, std::string& out)
 	{
 		std::string script = BundledScriptPath();
 		if (script.empty())
@@ -188,7 +189,7 @@ namespace
 
 	// Run "vw-update.ps1 <args>" via PowerShell and capture its stdout into out.
 	// Blocks until the script finishes. Returns false if it could not be started.
-	bool RunScript(const std::vector<std::string>& args, std::string& out)
+	bool RunBundledScript(const std::vector<std::string>& args, std::string& out)
 	{
 		std::string script = BundledScriptPath();
 		if (script.empty())
@@ -301,54 +302,66 @@ namespace
 	EVENT_DISPATCH_MAP_END;
 
 	// -----------------------------------------------------------------------
-	// Native dialog wrappers.
-	// -----------------------------------------------------------------------
-
+	// The concrete host the plug-in uses at run time. It implements the four
+	// IUpdaterHost seams the SDK-independent flows (UpdaterFlow.cpp) call, in
+	// terms of the real Vectorworks SDK dialogs, the bundled script, and the
+	// VWFC picker above. Swapping a fake in for this interface is what lets those
+	// flows be unit-tested without the SDK (see tests/UpdaterFlowTests.cpp).
+	//
 	// Note: the SDK's TXString constructs implicitly from a (UTF-8) const char*,
-	// which is how the existing menu-command AlertInform call passes its text, so
-	// we pass std::string::c_str() directly and let that conversion happen.
-
-	void Inform(const std::string& text, const std::string& advice)
+	// so we pass std::string::c_str() directly and let that conversion happen.
+	// -----------------------------------------------------------------------
+	class CVectorworksUpdaterHost : public SamplePlugin::IUpdaterHost
 	{
-		// false => modal dialog (not a minor/status-bar alert), so the advice
-		// line is shown too. Matches the existing menu-command alert.
-		gSDK->AlertInform(text.c_str(), advice.c_str(), false);
-	}
-
-	// Yes/no question. Returns true if the user chose the affirmative button.
-	bool Ask(const std::string& text, const std::string& advice,
-			 const std::string& okText, const std::string& cancelText)
-	{
-		// AlertQuestion returns 0 = negative/cancel, 1 = positive/OK, 2/3 = custom
-		// buttons A/B. defaultButton 1 = the OK button is the default.
-		short r = gSDK->AlertQuestion(
-			text.c_str(), advice.c_str(),
-			/*defaultButton*/ 1,
-			okText.c_str(), cancelText.c_str(),
-			/*customButtonA*/ "", /*customButtonB*/ "");
-		return r == 1;
-	}
-
-	// Run the bundled installer for one plug-in. Returns true on success; fills
-	// errorOut with the script's message on failure.
-	bool Install(const std::string& url, const std::string& name, std::string& errorOut)
-	{
-		std::string out;
-		if (!RunScript({ "do-install", url, name }, out))
+	public:
+		bool RunScript(const std::vector<std::string>& args, std::string& out) override
 		{
-			errorOut = "アップデータを起動できませんでした。";
-			return false;
+			return RunBundledScript(args, out);
 		}
-		if (InstallReportedOk(out))
-			return true;
 
-		errorOut = InstallErrorText(out, "インストールに失敗しました。");
-		return false;
-	}
+		void Inform(const std::string& text, const std::string& advice) override
+		{
+			// false => modal dialog (not a minor/status-bar alert), so the advice
+			// line is shown too. Matches the existing menu-command alert.
+			gSDK->AlertInform(text.c_str(), advice.c_str(), false);
+		}
+
+		// Yes/no question. Returns true if the user chose the affirmative button.
+		bool Ask(const std::string& text, const std::string& advice,
+				 const std::string& okText, const std::string& cancelText) override
+		{
+			// AlertQuestion returns 0 = negative/cancel, 1 = positive/OK, 2/3 =
+			// custom buttons A/B. defaultButton 1 = the OK button is the default.
+			short r = gSDK->AlertQuestion(
+				text.c_str(), advice.c_str(),
+				/*defaultButton*/ 1,
+				okText.c_str(), cancelText.c_str(),
+				/*customButtonA*/ "", /*customButtonB*/ "");
+			return r == 1;
+		}
+
+		// Show the native build picker; return the chosen 0-based index, or -1 if
+		// the user cancelled.
+		int PickBuild(const std::vector<std::string>& items, int initialSel) override
+		{
+			std::vector<TXString> txItems;
+			for (const std::string& s : items)
+				txItems.push_back(TXString(s.c_str()));
+
+			CBuildPickerDialog dlg(txItems, static_cast<short>(initialSel));
+			if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
+				return -1;						// cancelled -> keep the loaded build
+			return dlg.GetSelection();
+		}
+	};
 }
 
 namespace SamplePlugin
 {
+	// The public entry points are thin: they enforce "run once per session" and
+	// wire the real host + compiled-in build identity into the SDK-independent
+	// flows (UpdaterFlow.cpp), which hold the actual logic (and the tests).
+
 	void RunStableStartupCheck()
 	{
 		// plugin_module_main can be called more than once per session; only do
@@ -358,29 +371,8 @@ namespace SamplePlugin
 			return;
 		sDone = true;
 
-		std::string out;
-		if (!RunScript({ "q-stable" }, out))
-			return;								// script missing -> stay silent
-
-		// All the parse-and-decide logic is in UpdaterParse.h so it is unit-tested;
-		// here we only act on the verdict (offline / incomplete / already-current
-		// all come back as offerUpdate == false).
-		StableStatus st = EvaluateStable(out);
-		if (!st.offerUpdate)
-			return;
-
-		std::string shownInstalled = st.installed.empty() ? "none" : st.installed;
-		if (!Ask("新しい安定版ビルドがあります。今すぐインストールしますか？",
-				 "インストール済み: " + shownInstalled + "\n最新: " + st.latest,
-				 "インストール", "後で"))
-			return;
-
-		std::string err;
-		if (Install(st.url, "SamplePlugin", err))
-			Inform("SamplePlugin を更新しました。",
-				   "反映するには Vectorworks を再起動してください。");
-		else
-			Inform("更新に失敗しました。", err);
+		CVectorworksUpdaterHost host;
+		RunStableStartupCheckWith(host);
 	}
 
 	void RunDevStartupCheck()
@@ -392,56 +384,10 @@ namespace SamplePlugin
 			return;
 		sDone = true;
 
-		std::string out;
-		if (!RunScript({ "q-dev" }, out) || !ValueOf(out, "error").empty())
-		{
-			// Offline / transient: don't block start-up — just carry on with the
-			// currently loaded build.
-			return;
-		}
-
-		// The build that is actually loaded and running right now. Compiled in,
-		// so it is unambiguous even if a different build is staged on disk.
-		const std::string runningBranch = VW_BUILD_BRANCH;
-		const std::string runningCommit = VW_BUILD_VERSION;
-
-		// Candidates to switch TO: every prerelease except the running build.
-		// (Parsing + the exclude-the-running-build filter are unit-tested in
-		// UpdaterParse.h; see DevSwitchCandidates.)
-		std::vector<DevBuild> others = DevSwitchCandidates(out, runningCommit);
-
-		// One drop-down listing everything: entry 0 is the installed build,
-		// entries 1.. are the other branches' prereleases.
-		std::vector<TXString> items;
-		{
-			std::string cur = "現在: " + runningBranch + " (" + runningCommit + ") ― インストール済み";
-			items.push_back(TXString(cur.c_str()));
-		}
-		for (const DevBuild& b : others)
-		{
-			std::string line = b.name + "  (" + b.commit + ")";
-			items.push_back(TXString(line.c_str()));
-		}
-
-		CBuildPickerDialog dlg(items, /*initialSel*/ 0);
-		if (dlg.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
-			return;								// cancelled -> keep the loaded build
-
-		// Map the drop-down's selection back to a candidate (entry 0 or an
-		// out-of-range value both mean "keep the installed build"). Logic is
-		// unit-tested; see ResolveDevSelection.
-		int idx = ResolveDevSelection(dlg.GetSelection(), others.size());
-		if (idx < 0)
-			return;
-		const DevBuild& pick = others[static_cast<size_t>(idx)];
-
-		// A different build was chosen: install it (restart to load).
-		std::string err;
-		if (Install(pick.url, "SamplePluginDev", err))
-			Inform("開発版ビルドをインストールしました。",
-				   "反映するには Vectorworks を再起動してください。\n"
-				   "branch: " + pick.name + "\ncommit: " + pick.commit);
-		else
-			Inform("インストールに失敗しました。", err);
+		// The build that is actually loaded and running right now is compiled in
+		// (VW_BUILD_BRANCH/VERSION), so it is unambiguous even if a different
+		// build is staged on disk.
+		CVectorworksUpdaterHost host;
+		RunDevStartupCheckWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION);
 	}
 }

@@ -6,9 +6,16 @@
 
 ## 何をテストしているか
 
-テスト対象は `src/UpdaterParse.h` に集約された **純粋ロジック**（`std::string` /
-`std::vector` だけに依存し、`gSDK`・`dladdr`・Win32・VWFC ダイアログに一切触れない関数）
-です。アップデータの実質的な分岐はここに寄せてあり、`Updater.cpp` は残った
+テストは 2 本立てです。
+
+1. **`UpdaterParseTests`** … `src/UpdaterParse.h` の純粋ロジック（`std::string` /
+   `std::vector` だけに依存し、`gSDK`・`dladdr`・Win32・VWFC ダイアログに一切触れない
+   関数）を関数単位でテストします。
+2. **`UpdaterFlowTests`** … 起動時の更新フロー本体（`RunStableStartupCheckWith` /
+   `RunDevStartupCheckWith`、`src/UpdaterFlow.cpp`）を、**フェイクの `IUpdaterHost`**
+   越しに丸ごと動かして、分岐とダイアログ文言まで検証します（後述）。
+
+`Updater.cpp` は残った
 
 - 自分自身のバイナリ位置の解決（`dladdr` / `GetModuleFileName`）
 - スクリプトの起動（`popen` / `_popen`）
@@ -28,6 +35,33 @@
 最後の「更新フローの判断」層は、もともと `Updater.cpp` の `gSDK` 呼び出しの合間に
 インラインで書かれていた分岐です。純粋関数として切り出したことで単体テストの対象になり、
 `Updater.cpp` 側は判断結果を受けてダイアログを出すだけになりました。
+
+## フロー全体のテスト（インターフェイス／フェイク方式）
+
+判断だけでなく **フロー全体**（スクリプトに問い合わせ→判断→ダイアログ→インストール→
+結果表示）も SDK 抜きでテストしています。フローが実行する副作用を 4 つに絞って
+`IUpdaterHost`（`src/UpdaterHost.h`）というインターフェイスにまとめました。
+
+| メソッド | 本番（`Updater.cpp`） | テスト（`UpdaterFlowTests.cpp`） |
+|----------|----------------------|--------------------------------|
+| `RunScript` | 同梱スクリプトを `popen` で実行 | 固定の stdout を返す |
+| `Inform` / `Ask` | `gSDK->AlertInform` / `AlertQuestion` | 呼び出しを記録／既定の回答を返す |
+| `PickBuild` | VWFC のプルダウンダイアログ | 選択インデックスを返す |
+
+フロー本体（`RunStableStartupCheckWith` / `RunDevStartupCheckWith`、`src/UpdaterFlow.cpp`）
+は `IUpdaterHost&` だけに依存し、SDK ヘッダを一切 include しません。よって
+
+- **本番** は `Updater.cpp` が `gSDK` / `popen` / VWFC で実装した本物の host を渡し、
+- **テスト** は呼び出しを記録して canned な回答を返すフェイク host を渡す
+
+だけで、「更新あり→肯定→インストール成功→完了ダイアログ」「ユーザーが拒否→何もしない」
+「インストール失敗→エラー文言」といった経路を、**実際のダイアログ文言と `do-install` の
+引数まで含めて**検証できます。
+
+> これは **ユニットテスト（コンポーネントテスト）** です。テスト対象の「ユニット」は
+> フロー関数で、host はそれを差し替えるテストダブル（フェイク）です。**e2e ではありません**
+> — e2e なら実際に Vectorworks 上でプラグインを起動し、本物の GitHub API を叩き、本物の
+> ダイアログを出して確認することになります。ここではプロセス内で SDK ゼロで完結します。
 
 ## テストの実行
 
@@ -49,36 +83,21 @@ gcovr --root . --filter 'src/.*' buildcov --txt --print-summary
 テスト自体は依存ゼロの小さなハーネス（`TestFramework.h`）で書きます。`TEST(name){ … }`
 の中で `CHECK` / `CHECK_EQ` を使い、`TEST_MAIN()` を 1 か所だけ置きます。
 
-## 残りの部分をどうカバーするか（提案）
+## それでも残る部分
 
-上記の切り出しで、アップデータの「判断」はほぼ全て SDK 抜きでテストできています。まだ
-テストが届いていないのは次の 2 種類だけで、いずれも **SDK / OS のモックが要る** 領域です。
+判断もフローも SDK 抜きでカバーできたので、テストが届いていないのは
+**外部 API の呼び出しそのもの** だけになりました。
 
-### 1. `Updater.cpp` のプラットフォーム・グルー
+### 1. `Updater.cpp` の薄いグルー
 
-`BundledScriptPath` / `BundlePluginsDir` / `RunScript` と、`Inform` / `Ask` /
-`Install` の骨格。ロジックは薄く（導出は `*FromBinary` 系に、判定は `Evaluate*` /
-`InstallReportedOk` などに委譲済み）、残るのは外部 API の呼び出しそのものです。
-
-SDK 抜きでここまで踏み込むなら、**シーム（seam）を挿してフェイクに差し替える** のが
-現実的です。案:
-
-- **`gSDK` のフェイク化** … `Inform` / `Ask` が使うのは `AlertInform` /
-  `AlertQuestion` の 2 メソッドだけです。この 2 つを持つ小さなインターフェイス
-  （例 `IUpdaterUI`）を定義し、本番は `gSDK` に委譲する実装、テストは呼び出しを記録して
-  戻り値を返すフェイク実装を渡します。これで `RunStableStartupCheck` /
-  `RunDevStartupCheck` の「更新あり→肯定→インストール成功→完了ダイアログ」といった
-  **フロー全体** を、ダイアログ文言と分岐まで含めて検証できます。
-- **スクリプト実行のシーム化** … `RunScript` を関数ポインタ／`std::function` 越しに
-  呼ぶようにして、テストでは実プロセスを起こさず固定の stdout を返すフェイクに差し替え。
-  `q-stable` / `q-dev` / `do-install` の各出力に対する挙動を、`popen` なしで通せます。
-- **VWFC ダイアログ**（`CBuildPickerDialog`）は VWFC の型に強く依存するため、単体テスト
-  よりも「選択インデックス → ビルド」の写像（`ResolveDevSelection`、テスト済み）に責務を
-  寄せ、ダイアログ自体は薄いままにしておくのが費用対効果に見合います。
-
-いずれも「SDK をフルにモックする」のではなく、**プラグインが実際に触る数個の関数だけを
-インターフェイス化して差し替える** 方針です。SDK ヘッダ全体のスタブ化は保守コストが高い
-割にリターンが小さいので推奨しません。
+`BundledScriptPath` / `BundlePluginsDir` / `RunBundledScript`（`popen`）と、
+`CVectorworksUpdaterHost` の各メソッド（`gSDK->AlertInform` / `AlertQuestion` の呼び出し、
+VWFC ダイアログの生成）。ロジックは全て他へ委譲済みで、ここは「どの SDK 関数を呼ぶか」
+という配線だけです。パスの導出は `*FromBinary`（テスト済み）に、選択→ビルドの写像は
+`ResolveDevSelection`（テスト済み）に寄せてあるため、この層をさらにテストするための
+SDK ヘッダ全体のスタブ化は、保守コストが高い割にリターンが小さいので推奨しません。
+`CBuildPickerDialog` も同様に、責務を `PickBuild` の外（`ResolveDevSelection`）へ
+出してあるので薄いままにしています。
 
 ### 2. シェル／PowerShell スクリプト（`scripts/vw-update.sh` / `vw-update.ps1`）
 
@@ -89,7 +108,8 @@ GitHub API 取得・zip 展開・インストールを担う部分。ここは C
 
 ## まとめ
 
-- **原則**: 分岐ロジックは `UpdaterParse.h` の純粋関数に寄せ、SDK 抜きで網羅的にテストする。
-- **次の一手（任意）**: それでも残る `gSDK` / `RunScript` のグルーは、SDK 全体をモックする
-  のではなく、プラグインが触る少数の呼び出しにシームを挿してフェイク化すれば、
-  フロー全体まで安全にテストを広げられる。
+- **判断**は `UpdaterParse.h` の純粋関数に寄せ、関数単位で網羅的にテストする。
+- **フロー**は `IUpdaterHost` というシームを挟み、SDK 全体をモックするのではなく
+  プラグインが触る 4 つの副作用だけをフェイク化して、分岐と文言まで丸ごとテストする
+  （ユニット／コンポーネントテスト。e2e ではない）。
+- 残るのは SDK 関数を呼ぶだけの薄い配線で、ここは費用対効果からテスト対象外とする。
