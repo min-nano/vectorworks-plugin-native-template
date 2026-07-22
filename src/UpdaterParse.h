@@ -52,7 +52,7 @@ namespace SamplePlugin::UpdaterParse
 			std::string::size_type const eol = out.find('\n', pos);
 			std::string const line =
 				out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
-			if (line.compare(0, needle.size(), needle) == 0)
+			if (line.starts_with(needle))
 				return Trim(line.substr(needle.size()));
 			if (eol == std::string::npos)
 				break;
@@ -82,7 +82,7 @@ namespace SamplePlugin::UpdaterParse
 				out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
 			pos = (eol == std::string::npos) ? out.size() : eol + 1;
 
-			if (line.compare(0, 6, "build\t") != 0)
+			if (!line.starts_with("build\t"))
 				continue;
 
 			// Split the three tab-separated fields after "build".
