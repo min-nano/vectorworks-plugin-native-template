@@ -232,16 +232,17 @@ ctest --test-dir build-tests --output-on-failure
 - `VW_BUILD_TESTS`（既定 `OFF`）… ユニットテストをビルドします。
 - `VW_ENABLE_COVERAGE`（既定 `OFF`）… テストに gcov 用の計測を付けます（GCC / Clang）。
 
-### カバレッジと GitHub Code Quality
+### カバレッジと Codecov
 
 `.github/workflows/test.yml` は、テストを Linux ランナー（SDK のダウンロード不要
 なので高速）で実行する **`test` ジョブ**と、それに続く **`coverage` ジョブ**の 2 つに
 分かれています。`test` の失敗はテスト自体の失敗を、`coverage` の失敗はレポート生成／
 アップロードの失敗を意味するので、原因を切り分けやすくしています。`coverage` ジョブは
 `test` の成功後にのみ実行され、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成
-して、`actions/upload-code-coverage` で **GitHub Code Quality** に送信します。カバレッジ
-はプルリクエスト上に集計値として表示されます。アップロードには `code-quality: write`
-権限が必要で、トークンが読み取り専用となるフォーク PR ではスキップされます
+して、`codecov/codecov-action` で **Codecov** に送信します。カバレッジは Codecov 上で
+集計され、プルリクエストにはコメントとステータスで表示されます。パブリックリポジトリ
+はトークンなしでアップロードできるためフォーク PR でも動作しますが、レート制限を避ける
+ため Codecov が推奨する `CODECOV_TOKEN` シークレットを設定しておくと確実です
 （レポートはアーティファクトとしては常に保存されます）。
 
 ```bash
