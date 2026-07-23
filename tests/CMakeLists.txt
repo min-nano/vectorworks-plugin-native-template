@@ -34,6 +34,15 @@ function(vw_add_test name)
 	# Tests include the sources under "src" and the local "TestFramework.h".
 	target_include_directories(${name} PRIVATE "${CMAKE_SOURCE_DIR}/src"
 											   "${CMAKE_CURRENT_SOURCE_DIR}")
+	# Warnings are errors for the test build: any new warning fails CI rather than
+	# scrolling past unnoticed. MSVC uses /W4 /WX; GCC/Clang use -Wall -Wextra
+	# -Werror. Applied per test target so it never leaks into the SDK plug-in
+	# build (whose SDK headers are not warning-clean).
+	if(MSVC)
+		target_compile_options(${name} PRIVATE /W4 /WX)
+	else()
+		target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+	endif()
 	if(VW_ENABLE_COVERAGE)
 		target_compile_options(
 			${name}
