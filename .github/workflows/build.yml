@@ -16,6 +16,22 @@ on:
 permissions:
   contents: read
 
+# One build per ref. On a pull request a new push cancels the in-flight build
+# for that PR: only the latest commit's dev prerelease matters, so racing an
+# outdated build to completion just wastes runner time. The delete+recreate of
+# the "dev-<branch>" prerelease is per-branch and idempotent, so a cancel mid-
+# publish is harmless — the newer run that triggered the cancellation republishes
+# the prerelease for its (newer) commit, and state converges to the latest push.
+#
+# On main we deliberately do NOT cancel (cancel-in-progress is false for push /
+# workflow_dispatch): every commit to main publishes its own stable release, so
+# each build must run to completion and none may be superseded. The group is
+# per-ref (refs/pull/<n>/merge is unique per PR, refs/heads/main for main), so
+# one branch's build never cancels another's.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-mac:
     # Apple Silicon runner (macos-14 and macos-15 are arm64).
