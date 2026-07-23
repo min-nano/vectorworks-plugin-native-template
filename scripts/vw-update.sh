@@ -347,7 +347,10 @@ q_dev() {
 # would show an osascript dialog) so the plug-in owns all UI.
 do_install() {
 	local url="$1" name="$2"
-	[ -n "$url" ] && [ -n "$name" ] || { echo "error=引数が不足しています。"; return 0; }
+	if [ -z "$url" ] || [ -z "$name" ]; then
+		echo "error=引数が不足しています。"
+		return 0
+	fi
 
 	local tmp work; tmp="$(mktemp -d)"; work="$(mktemp -d)"
 	if ! download "$url" "$tmp/$name.vwlibrary.zip"; then

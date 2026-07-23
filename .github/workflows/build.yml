@@ -37,10 +37,14 @@ jobs:
       # developer pushed and the one the dev prerelease should point at.
       - name: Resolve build context
         id: ctx
+        env:
+          # head_ref is attacker-controllable (a branch name), so pass it through
+          # the environment instead of interpolating it into the script directly.
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
-            ref="${{ github.head_ref }}"
+            ref="$HEAD_REF"
           else
             sha="${{ github.sha }}"
             ref="${{ github.ref_name }}"
@@ -234,10 +238,14 @@ jobs:
       - name: Resolve build context
         id: ctx
         shell: bash
+        env:
+          # head_ref is attacker-controllable (a branch name), so pass it through
+          # the environment instead of interpolating it into the script directly.
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
-            ref="${{ github.head_ref }}"
+            ref="$HEAD_REF"
           else
             sha="${{ github.sha }}"
             ref="${{ github.ref_name }}"
@@ -452,10 +460,14 @@ jobs:
       # Same commit/ref resolution as the build jobs (PR head, or pushed sha).
       - name: Resolve build context
         id: ctx
+        env:
+          # head_ref is attacker-controllable (a branch name), so pass it through
+          # the environment instead of interpolating it into the script directly.
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
-            ref="${{ github.head_ref }}"
+            ref="$HEAD_REF"
           else
             sha="${{ github.sha }}"
             ref="${{ github.ref_name }}"
@@ -518,13 +530,13 @@ jobs:
               --notes-file notes.txt \
               --latest
           }
-          publish && exit 0 || true
+          if publish; then exit 0; fi
           attempts=1
           for delay in 30 60 120 300 600; do
             echo "publish attempt $attempts failed; retrying in ${delay}s..."
             sleep "$delay"
             attempts=$((attempts + 1))
-            publish && exit 0 || true
+            if publish; then exit 0; fi
           done
           echo "::error::Failed to publish the stable release after $attempts attempts."
           exit 1
