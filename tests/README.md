@@ -6,7 +6,7 @@
 
 ## 何をテストしているか
 
-テストは 4 本立てです。
+テストは 5 本立てです。
 
 1. **`UpdaterParseTests`** … `src/UpdaterParse.h` の純粋ロジック（`std::string` /
    `std::vector` だけに依存し、`gSDK`・`dladdr`・Win32・VWFC ダイアログに一切触れない
@@ -14,11 +14,18 @@
 2. **`UpdaterFlowTests`** … 起動時の更新フロー本体（`RunStableStartupCheckWith` /
    `RunDevStartupCheckWith`、`src/UpdaterFlow.cpp`）を、**フェイクの `IUpdaterHost`**
    越しに丸ごと動かして、分岐とダイアログ文言まで検証します（後述）。
-3. **`UpdaterScriptTests`** … 同梱スクリプト `scripts/vw-update.sh`（macOS）の
+3. **`UpdaterRobustnessTests`** … `src/UpdaterParse.h` のパーサに **予期しない外部入力**
+   （壊れたスクリプト出力・埋め込み NUL・巨大／退化した行・ランダムなバイト列）を
+   食わせ、境界外アクセスや未定義動作を起こさないこと、そして「戻り値の `url` は必ず
+   非空」「`EvaluateStable` が更新を提示するのは整形式のときだけ」「`ResolveDevSelection`
+   は範囲外を返さない」といった**契約**が保たれることを検証します。とりわけ
+   **ASan / UBSan 有効時**（後述）に真価を発揮し、リファクタが招くメモリ不正や、GitHub 側
+   仕様変更で崩れた入力への耐性を守ります（`tests/UpdaterRobustnessTests.cpp`）。
+4. **`UpdaterScriptTests`** … 同梱スクリプト `scripts/vw-update.sh`（macOS）の
    **機械可読バックエンド**（`q-stable` / `q-dev` / `do-install` と、その土台の
    `asset_url` / `installed_commit`）を、`curl` / `plutil` を差し替えて検証します
    （`tests/vw-update.test.sh`、後述）。
-4. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
+5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
    `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
    後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
 
@@ -86,6 +93,28 @@ cmake --build buildcov
 ctest --test-dir buildcov
 gcovr --root . --filter 'src/.*' buildcov --txt --print-summary
 ```
+
+サニタイザ（ASan + UBSan。GCC か Clang が必要）で回す:
+
+```sh
+cmake -S . -B buildsan -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
+cmake --build buildsan
+ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+    ctest --test-dir buildsan --output-on-failure
+```
+
+`-DVW_ENABLE_SANITIZERS=ON` を付けると、各テストバイナリが
+`-fsanitize=address,undefined -fno-sanitize-recover=all` でビルドされ、
+**境界外アクセス・use-after-free・メモリリーク・未定義動作**を検出した時点で
+（アサーションの成否とは無関係に）テストが失敗します。CI の `test` ジョブは常に
+この設定で回るので（`.github/workflows/test.yml`）、
+
+- **リファクタ**でメモリ不正を持ち込めばそのコミットで赤くなり、
+- **予期しない外部入力**（例: GitHub 側の仕様変更で崩れた updater パーサ入力）は
+  `UpdaterRobustnessTests` の擬似ファズが大量に流し込み、サニタイザが番人になります。
+
+カバレッジ計測とは別ジョブ・別ビルドに分けてあるので、赤の原因が「テスト失敗＋
+サニタイザ検出」か「カバレッジ閾値割れ」かで一目で切り分けられます。
 
 テスト自体は依存ゼロの小さなハーネス（`TestFramework.h`）で書きます。`TEST(name){ … }`
 の中で `CHECK` / `CHECK_EQ` を使い、`TEST_MAIN()` を 1 か所だけ置きます。

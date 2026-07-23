@@ -240,12 +240,29 @@ cmake --build build-tests
 ctest --test-dir build-tests --output-on-failure
 ```
 
+サニタイザ（AddressSanitizer + UBSan）を有効にして回す（メモリ不正・未定義動作の検出）:
+
+```bash
+cmake -S . -B build-san -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
+cmake --build build-san
+ctest --test-dir build-san --output-on-failure
+```
+
+CI の `test` ジョブは常にこの設定でテストを回すため、リファクタが招くメモリ不正
+（境界外アクセス・use-after-free・リーク）や、updater パーサが GitHub 側の仕様変更で
+崩れた入力を誤処理するケースは、その場でビルドを赤にできます。予期しない外部入力に
+対する耐性は `tests/UpdaterRobustnessTests.cpp` の擬似ファズ／敵対的入力テストが担い、
+サニタイザがその番人になります（詳細は `tests/README.md`）。
+
 ビルドオプション:
 
 - `VW_BUILD_PLUGIN`（既定 `ON`）… プラグイン本体をビルドします（SDK が必要で、
   macOS / Windows のみ）。テストだけをビルドしたいときは `OFF` にします。
 - `VW_BUILD_TESTS`（既定 `OFF`）… ユニットテストをビルドします。
 - `VW_ENABLE_COVERAGE`（既定 `OFF`）… テストに gcov 用の計測を付けます（GCC / Clang）。
+- `VW_ENABLE_SANITIZERS`（既定 `OFF`）… テストを ASan + UBSan
+  （`-fsanitize=address,undefined -fno-sanitize-recover=all`）でビルド・実行します
+  （GCC / Clang）。
 
 ### カバレッジレポート（GitHub Actions で内製）
 

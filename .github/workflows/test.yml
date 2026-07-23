@@ -3,8 +3,14 @@ name: Tests
 # The project's main CI for correctness: it runs the unit tests and, on top of
 # that, measures and reports coverage. Two jobs, split so a failure points
 # straight at its cause:
-#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them.
-#                A red X here means a TEST failed.
+#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them
+#                under AddressSanitizer + UndefinedBehaviorSanitizer, so a memory
+#                error (out-of-bounds read, use-after-free, leak) or undefined
+#                behaviour turns the run red — not just a failed assertion. This
+#                guards against refactors introducing memory bugs and against the
+#                updater parser mishandling unexpected external input (the fuzz /
+#                adversarial cases in tests/UpdaterRobustnessTests.cpp).
+#                A red X here means a TEST failed OR the sanitizers tripped.
 #   * coverage — only after `test` passes: rebuild with gcov instrumentation,
 #                produce a Cobertura report, and post it as a comment on the
 #                pull request (overall coverage + coverage of the lines this PR
@@ -48,19 +54,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake g++
 
-      # Tests only (VW_BUILD_PLUGIN=OFF), no coverage instrumentation, so this
-      # job's result reflects the tests alone. No SDK required.
+      # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan (no
+      # coverage — that is the separate `coverage` job). g++ ships libasan /
+      # libubsan, so no extra packages are needed. No SDK required.
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DVW_BUILD_PLUGIN=OFF \
-            -DVW_BUILD_TESTS=ON
+            -DVW_BUILD_TESTS=ON \
+            -DVW_ENABLE_SANITIZERS=ON
 
       - name: Build tests
         run: cmake --build build -v
 
-      - name: Run tests
+      # abort_on_error/halt_on_error make the first sanitizer report fatal (the
+      # build already passes -fno-sanitize-recover=all); detect_leaks catches
+      # leaked allocations at exit; print_stacktrace points UBSan at the line.
+      - name: Run tests (ASan + UBSan)
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ctest --test-dir build --output-on-failure
 
   coverage:

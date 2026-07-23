@@ -17,6 +17,17 @@ if(VW_ENABLE_COVERAGE AND NOT (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
 	message(FATAL_ERROR "VW_ENABLE_COVERAGE requires GCC or Clang.")
 endif()
 
+# AddressSanitizer + UndefinedBehaviorSanitizer. Applied per test target (the
+# harness itself is tiny, so instrumenting it too costs nothing). With ASan a
+# heap/stack overflow or use-after-free aborts the run; with UBSan any undefined
+# behaviour does the same, and -fno-sanitize-recover=all makes even "recoverable"
+# UBSan reports fatal so CI turns red instead of merely logging. -g keeps the
+# frame info that makes the sanitizer reports point at a source line, and
+# -fno-omit-frame-pointer keeps the stack traces readable.
+if(VW_ENABLE_SANITIZERS AND NOT (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+	message(FATAL_ERROR "VW_ENABLE_SANITIZERS requires GCC or Clang.")
+endif()
+
 function(vw_add_test name)
 	add_executable(${name} ${ARGN})
 	target_compile_features(${name} PRIVATE cxx_std_20)
@@ -33,6 +44,12 @@ function(vw_add_test name)
 					-ftest-coverage)
 		target_link_options(${name} PRIVATE --coverage)
 	endif()
+	if(VW_ENABLE_SANITIZERS)
+		target_compile_options(
+			${name} PRIVATE -g -fno-omit-frame-pointer -fsanitize=address,undefined
+							-fno-sanitize-recover=all)
+		target_link_options(${name} PRIVATE -fsanitize=address,undefined)
+	endif()
 	add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -42,6 +59,13 @@ vw_add_test(UpdaterParseTests UpdaterParseTests.cpp)
 # The flows, compiled with the fake host. src/UpdaterFlow.cpp includes no SDK
 # header, so it links straight into the test binary.
 vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp")
+
+# Robustness / adversarial-input tests: feed the parsers unexpected external
+# input (malformed script output, embedded NULs, huge/degenerate lines, random
+# byte soup) to prove they never read out of bounds or invoke undefined
+# behaviour. Most valuable under VW_ENABLE_SANITIZERS, where a mistake aborts;
+# they also guard against a refactor quietly breaking the parsing contract.
+vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 
 # Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
 # script and drive its q-stable / q-dev / do-install functions with the network
