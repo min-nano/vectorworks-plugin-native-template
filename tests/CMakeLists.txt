@@ -46,11 +46,8 @@ function(vw_add_test name)
 	endif()
 	if(VW_ENABLE_SANITIZERS)
 		target_compile_options(
-			${name}
-			PRIVATE -g
-					-fno-omit-frame-pointer
-					-fsanitize=address,undefined
-					-fno-sanitize-recover=all)
+			${name} PRIVATE -g -fno-omit-frame-pointer -fsanitize=address,undefined
+							-fno-sanitize-recover=all)
 		target_link_options(${name} PRIVATE -fsanitize=address,undefined)
 	endif()
 	add_test(NAME ${name} COMMAND ${name})
