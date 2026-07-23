@@ -238,23 +238,52 @@ ctest --test-dir build-tests --output-on-failure
 - `VW_BUILD_TESTS`（既定 `OFF`）… ユニットテストをビルドします。
 - `VW_ENABLE_COVERAGE`（既定 `OFF`）… テストに gcov 用の計測を付けます（GCC / Clang）。
 
-### カバレッジと GitHub Code Quality
+### カバレッジレポート（GitHub Actions で内製）
 
 `.github/workflows/test.yml` は、テストを Linux ランナー（SDK のダウンロード不要
 なので高速）で実行する **`test` ジョブ**と、それに続く **`coverage` ジョブ**の 2 つに
-分かれています。`test` の失敗はテスト自体の失敗を、`coverage` の失敗はレポート生成／
-アップロードの失敗を意味するので、原因を切り分けやすくしています。`coverage` ジョブは
-`test` の成功後にのみ実行され、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成
-して、`actions/upload-code-coverage` で **GitHub Code Quality** に送信します。カバレッジ
-はプルリクエスト上に集計値として表示されます。アップロードには `code-quality: write`
-権限が必要で、トークンが読み取り専用となるフォーク PR ではスキップされます
-（レポートはアーティファクトとしては常に保存されます）。
+分かれています。`test` の失敗はテスト自体の失敗を、`coverage` の失敗はレポート生成の
+失敗を意味するので、原因を切り分けやすくしています。`coverage` ジョブは `test` の成功後
+にのみ実行され、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成します。
+
+カバレッジの可視化は **GitHub Actions だけで完結**しており、GitHub Code Quality など
+外部サービスには依存しません。レポートは次の 2 つの情報を **1 つの表**にまとめた
+**1 つの PR コメント**として投稿され（2 回目以降は同じコメントを自動更新）、常に
+ビルド成果物としても保存されます。
+
+- **全体カバレッジ（`src/`）**… `gcovr` の集計（行・分岐・関数）。
+- **差分カバレッジ**… `diff-cover` により、この PR が変更した行のみをベースブランチ
+  （マージベース）と比較したカバレッジ。新しく追加・変更したコードがテストされて
+  いるかがひと目で分かります。表の最終行に集計値だけを取り込みます（`diff-cover` の
+  Markdown 出力はそのまま貼らず、JSON 出力から値を抽出）。
+
+各行は絵文字で状態を色分けします（🟢 良好 / 🟡 注意 / 🔴 低 / ⚪ 参考）。しきい値は
+行 🟢≥95% 🟡≥90%、関数 🟢100%、差分 🟢100% 🟡≥95%、分岐は参考扱い（⚪）で、
+ワークフロー内の `THRESHOLDS` に一箇所でまとめており、変更できます。**🔴 が 1 つでも
+あると `coverage` ジョブは失敗します**（表示だけでなく CI でしきい値を強制）。この
+判定はすべてのイベントで走るため、`main` への push やフォーク PR（コメントはスキップ
+されますが判定は有効）でも同様に適用されます。
+
+コメントの投稿には `pull-requests: write` 権限が必要で、トークンが読み取り専用となる
+フォーク PR ではスキップされます（レポートはアーティファクトとしては常に保存されます）。
+`main` への push では比較対象の差分がないため、差分カバレッジとコメント投稿は行わず、
+レポートの生成・アーティファクト保存・しきい値判定を行います。
+
+チェックアウトは**浅い（shallow）まま**で、差分カバレッジに必要な履歴だけを都度取得
+します。全ブランチの全履歴を取る `fetch-depth: 0` は使わず、**ベースブランチのみ**を
+マージベースに届くまで段階的に deepen するので、CI 時間はリポジトリの履歴の長さでは
+なく、その PR の分岐量に応じた分だけで済みます。
+
+ローカルでは同じレポートを次のように再現できます（差分カバレッジはベースブランチを
+指定）:
 
 ```bash
 cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_COVERAGE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-summary
+# 差分カバレッジ（例: origin/main と比較）
+diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cover.md
 ```
 
 ## 継続的インテグレーション（CI）
