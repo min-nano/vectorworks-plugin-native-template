@@ -66,9 +66,17 @@ endif()
 #                                      job can run them on a plain Linux runner
 #                                      with -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON.
 #   * VW_ENABLE_COVERAGE (default OFF) -> add gcov instrumentation to the tests.
+#   * VW_ENABLE_SANITIZERS (default OFF) -> build/run the tests under
+#                                      AddressSanitizer + UndefinedBehaviorSanitizer
+#                                      so out-of-bounds accesses, use-after-free,
+#                                      leaks, and undefined behaviour fail the test
+#                                      run. Catches memory-safety regressions from
+#                                      refactoring and mishandling of unexpected
+#                                      external input (e.g. the updater parser).
 option(VW_BUILD_PLUGIN "Build the Vectorworks plug-in (requires the VW SDK)" ON)
 option(VW_BUILD_TESTS "Build the unit tests" OFF)
 option(VW_ENABLE_COVERAGE "Instrument the tests for code coverage (gcov/llvm-cov)" OFF)
+option(VW_ENABLE_SANITIZERS "Build/run the tests under AddressSanitizer + UBSan" OFF)
 
 if(VW_BUILD_PLUGIN
    AND NOT APPLE
