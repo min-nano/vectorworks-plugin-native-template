@@ -54,8 +54,8 @@ vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/Updat
 if(NOT WIN32)
 	find_program(BASH_PROGRAM bash)
 	if(BASH_PROGRAM)
-		add_test(NAME UpdaterScriptTests
-				 COMMAND "${BASH_PROGRAM}" "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.test.sh")
+		add_test(NAME UpdaterScriptTests COMMAND "${BASH_PROGRAM}"
+												 "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.test.sh")
 	endif()
 endif()
 
@@ -63,7 +63,6 @@ endif()
 # Invoke-GH/Invoke-WebRequest. No Pester needed — the harness is self-contained.
 find_program(PWSH_PROGRAM pwsh)
 if(PWSH_PROGRAM)
-	add_test(NAME UpdaterScriptTestsPs
-			 COMMAND "${PWSH_PROGRAM}" -NoProfile -File
-					 "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.Tests.ps1")
+	add_test(NAME UpdaterScriptTestsPs COMMAND "${PWSH_PROGRAM}" -NoProfile -File
+											   "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.Tests.ps1")
 endif()
