@@ -79,7 +79,7 @@ jobs:
           ref: ${{ steps.ctx.outputs.sha }}
 
       - name: Select Xcode 16.2
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: "16.2"
 
@@ -366,7 +366,7 @@ jobs:
       # GS_WIN configuration. Nothing is built here — only configured — so the
       # link-only SDK libraries are never needed.
       - name: Set up MSVC environment (for clang-cl)
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
