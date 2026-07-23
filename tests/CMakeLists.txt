@@ -42,3 +42,17 @@ vw_add_test(UpdaterParseTests UpdaterParseTests.cpp)
 # The flows, compiled with the fake host. src/UpdaterFlow.cpp includes no SDK
 # header, so it links straight into the test binary.
 vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp")
+
+# Back-end shell test for the macOS updater script (scripts/vw-update.sh). It
+# SOURCEs the script and drives its q-stable / q-dev / do-install functions with
+# curl/plutil stubbed, so it runs SDK- and network-free on a plain Linux runner
+# just like the C++ tests. Registered only where a POSIX bash is available; the
+# harness itself skips (exit 0) if python3/unzip/zip are missing. The Windows
+# counterpart (vw-update.ps1) would be tested with Pester in a separate job.
+if(NOT WIN32)
+	find_program(BASH_PROGRAM bash)
+	if(BASH_PROGRAM)
+		add_test(NAME UpdaterScriptTests
+				 COMMAND "${BASH_PROGRAM}" "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.test.sh")
+	endif()
+endif()

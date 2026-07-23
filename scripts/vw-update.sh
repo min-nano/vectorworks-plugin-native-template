@@ -405,4 +405,13 @@ main() {
 	esac
 }
 
-main "$@"
+# Run main only when executed directly (./vw-update.sh …), NOT when this file is
+# sourced. The plug-in and the manual/terminal use both EXECUTE the script, so
+# they are unaffected: run directly, $0 equals BASH_SOURCE[0] and main runs. The
+# unit tests (tests/vw-update.test.sh) SOURCE the file instead, to call the pure
+# back-end functions (asset_url / q_stable / q_dev / do_install) with curl/plutil
+# stubbed out — there BASH_SOURCE[0] != $0, so main does not run. This is the
+# shell analogue of the IUpdaterHost seam that makes UpdaterFlow.cpp testable.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	main "$@"
+fi
