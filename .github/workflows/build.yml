@@ -73,7 +73,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Build the resolved commit (PR head, or the pushed/ dispatched sha).
           ref: ${{ steps.ctx.outputs.sha }}
@@ -87,7 +87,7 @@ jobs:
       # SDKLib/LibMac are kept, so the cache is a few tens of MB rather than 800.
       - name: Restore Vectorworks SDK cache
         id: sdk-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
@@ -226,7 +226,7 @@ jobs:
           ls -l dist
 
       - name: Upload plug-in artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vwlibrary-zips
           path: dist
@@ -274,7 +274,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ steps.ctx.outputs.sha }}
 
@@ -282,7 +282,7 @@ jobs:
       # to build a Windows plug-in are kept, so the cache is small.
       - name: Restore Vectorworks SDK cache
         id: sdk-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
@@ -455,7 +455,7 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
 
       - name: Upload plug-in artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vlb-zips
           path: dist
@@ -504,13 +504,13 @@ jobs:
       # uploaded the ".vwlibrary.zip" bundles; the Windows job the ".vlb.zip"
       # modules. After both downloads dist/ holds all four assets.
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: vwlibrary-zips
           path: dist
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: vlb-zips
           path: dist
