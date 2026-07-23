@@ -242,7 +242,7 @@ jobs:
 
             const body = [
               marker,
-              '###### 🧪 Test coverage report',
+              '#### 🧪 Test coverage report',
               '',
               'Whole-project coverage of `src/`, plus coverage of only the ' +
                 'lines this PR changed (vs. the base branch).',
