@@ -111,7 +111,7 @@ if have cmake-format; then
 		report "cmake-format"
 	fi
 else
-	skip "cmake-format" "pip install cmakelang"
+	skip "cmake-format" "pip install cmakelang pyyaml"
 fi
 
 if have cmake-lint; then
@@ -119,7 +119,7 @@ if have cmake-lint; then
 	cmake-lint "${CMAKE_FILES[@]}"
 	report "cmake-lint"
 else
-	skip "cmake-lint" "pip install cmakelang"
+	skip "cmake-lint" "pip install cmakelang pyyaml"
 fi
 
 # ---------------------------------------------------------------------------

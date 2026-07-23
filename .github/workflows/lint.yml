@@ -138,8 +138,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      # cmakelang does not pull in PyYAML, but cmake-format needs it to read the
+      # YAML config file (.cmake-format.yaml), so install it explicitly.
       - name: Install cmakelang
-        run: pip install "cmakelang==${CMAKELANG_VERSION}"
+        run: pip install "cmakelang==${CMAKELANG_VERSION}" pyyaml
 
       # --check writes nothing and fails if a file is not already formatted; the
       # diff to apply is `cmake-format -i` (or scripts/lint.sh --fix).
