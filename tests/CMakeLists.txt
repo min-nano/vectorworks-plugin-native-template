@@ -21,26 +21,24 @@ function(vw_add_test name)
 	add_executable(${name} ${ARGN})
 	target_compile_features(${name} PRIVATE cxx_std_20)
 	# Tests include the sources under "src" and the local "TestFramework.h".
-	target_include_directories(${name} PRIVATE
-		"${CMAKE_SOURCE_DIR}/src"
-		"${CMAKE_CURRENT_SOURCE_DIR}"
-	)
+	target_include_directories(${name} PRIVATE "${CMAKE_SOURCE_DIR}/src"
+											   "${CMAKE_CURRENT_SOURCE_DIR}")
 	if(VW_ENABLE_COVERAGE)
-		target_compile_options(${name} PRIVATE
-			-O0 -g --coverage -fprofile-arcs -ftest-coverage)
+		target_compile_options(
+			${name}
+			PRIVATE -O0
+					-g
+					--coverage
+					-fprofile-arcs
+					-ftest-coverage)
 		target_link_options(${name} PRIVATE --coverage)
 	endif()
 	add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
 # Header-only helpers.
-vw_add_test(UpdaterParseTests
-	UpdaterParseTests.cpp
-)
+vw_add_test(UpdaterParseTests UpdaterParseTests.cpp)
 
 # The flows, compiled with the fake host. src/UpdaterFlow.cpp includes no SDK
 # header, so it links straight into the test binary.
-vw_add_test(UpdaterFlowTests
-	UpdaterFlowTests.cpp
-	"${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp"
-)
+vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp")
