@@ -225,6 +225,12 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 **どのプラットフォームでも**ユニットテストを実行できます。テスト本体は
 `tests/`（`tests/UpdaterParseTests.cpp`）にあり、外部依存のない極小のテストハーネス
 （`tests/TestFramework.h`）を使うため、テストフレームワークのダウンロードも不要です。
+同梱スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク
+境界だけを差し替えて同じく SDK ／ネットワーク抜きにテストします — macOS 版
+`scripts/vw-update.sh` は `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、
+Windows 版 `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
+`Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます
+（詳細は `tests/README.md`）。
 
 ローカルでの実行（SDK 不要）:
 
