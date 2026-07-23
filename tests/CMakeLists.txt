@@ -43,16 +43,27 @@ vw_add_test(UpdaterParseTests UpdaterParseTests.cpp)
 # header, so it links straight into the test binary.
 vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp")
 
-# Back-end shell test for the macOS updater script (scripts/vw-update.sh). It
-# SOURCEs the script and drives its q-stable / q-dev / do-install functions with
-# curl/plutil stubbed, so it runs SDK- and network-free on a plain Linux runner
-# just like the C++ tests. Registered only where a POSIX bash is available; the
-# harness itself skips (exit 0) if python3/unzip/zip are missing. The Windows
-# counterpart (vw-update.ps1) would be tested with Pester in a separate job.
+# Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
+# script and drive its q-stable / q-dev / do-install functions with the network
+# boundary stubbed, so they run SDK- and network-free — the same idea as the C++
+# tests, and cross-platform: PowerShell (pwsh) runs on the Linux CI runner too.
+# Each is registered only when its interpreter is found, and each harness itself
+# skips (exit 0) when a tool it needs is missing.
+
+# macOS updater (scripts/vw-update.sh) via bash + stubbed curl/plutil.
 if(NOT WIN32)
 	find_program(BASH_PROGRAM bash)
 	if(BASH_PROGRAM)
 		add_test(NAME UpdaterScriptTests
 				 COMMAND "${BASH_PROGRAM}" "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.test.sh")
 	endif()
+endif()
+
+# Windows updater (scripts/vw-update.ps1) via PowerShell 7 (pwsh) + stubbed
+# Invoke-GH/Invoke-WebRequest. No Pester needed — the harness is self-contained.
+find_program(PWSH_PROGRAM pwsh)
+if(PWSH_PROGRAM)
+	add_test(NAME UpdaterScriptTestsPs
+			 COMMAND "${PWSH_PROGRAM}" -NoProfile -File
+					 "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.Tests.ps1")
 endif()

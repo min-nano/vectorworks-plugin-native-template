@@ -273,23 +273,33 @@ function Invoke-Dev {
 }
 
 # ---------------------------------------------------------------------------
-$mode = if ($args.Count -ge 1) { [string] $args[0] } else { '' }
+# Dispatch only when this file is EXECUTED (the plug-in runs it with -File; a
+# manual run is the same), NOT when it is dot-sourced. The unit tests
+# (tests/vw-update.Tests.ps1) dot-source the script to call its back-end
+# functions (Get-AssetUrl / Invoke-QStable / Invoke-QDev / Invoke-DoInstall) with
+# Invoke-GH / Invoke-WebRequest stubbed out — there $MyInvocation.InvocationName
+# is '.', so the switch below does not run. This is the PowerShell analogue of the
+# BASH_SOURCE guard in vw-update.sh, and of the IUpdaterHost seam that makes
+# UpdaterFlow.cpp testable.
+if ($MyInvocation.InvocationName -ne '.') {
+    $mode = if ($args.Count -ge 1) { [string] $args[0] } else { '' }
 
-switch ($mode) {
-    'q-stable'   { Invoke-QStable }
-    'q-dev'      { Invoke-QDev }
-    'do-install' { Invoke-DoInstall ([string] $args[1]) ([string] $args[2]) }
-    'stable'     { Invoke-Stable }
-    'dev'        { Invoke-Dev }
-    '' {
-        Write-Host 'どのビルドを確認しますか？'
-        Write-Host '  [1] stable（安定版 / main）'
-        Write-Host '  [2] dev（開発版 / ブランチ選択）'
-        switch (Read-Host '番号') {
-            '1' { Invoke-Stable }
-            '2' { Invoke-Dev }
-            default { Write-Host 'キャンセルしました。' }
+    switch ($mode) {
+        'q-stable'   { Invoke-QStable }
+        'q-dev'      { Invoke-QDev }
+        'do-install' { Invoke-DoInstall ([string] $args[1]) ([string] $args[2]) }
+        'stable'     { Invoke-Stable }
+        'dev'        { Invoke-Dev }
+        '' {
+            Write-Host 'どのビルドを確認しますか？'
+            Write-Host '  [1] stable（安定版 / main）'
+            Write-Host '  [2] dev（開発版 / ブランチ選択）'
+            switch (Read-Host '番号') {
+                '1' { Invoke-Stable }
+                '2' { Invoke-Dev }
+                default { Write-Host 'キャンセルしました。' }
+            }
         }
+        default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install）。" }
     }
-    default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install）。" }
 }
