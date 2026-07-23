@@ -20,9 +20,10 @@ trim_trailing_whitespace = true
 indent_style = tab
 indent_size = 4
 
-# CMake, YAML, JSON, Markdown: spaces.
+# CMake: tabs, width 4 — same as the C/C++ sources and enforced by cmake-format
+# (.cmake-format.yaml sets use_tabchars).
 [{CMakeLists.txt,*.cmake}]
-indent_style = space
+indent_style = tab
 indent_size = 4
 
 [*.{yml,yaml,json}]
