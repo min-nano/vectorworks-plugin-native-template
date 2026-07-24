@@ -11,6 +11,8 @@
 #   * actionlint            — GitHub workflow validity (+ shellcheck on inline
 #                             run: scripts)
 #   * shellcheck            — the stand-alone scripts/*.sh
+#   * PSScriptAnalyzer      — PowerShell static analysis for scripts/*.ps1
+#                             (PSScriptAnalyzerSettings.psd1)
 #   * yamllint              — structural YAML style (.yamllint.yaml)
 #   * editorconfig-checker  — final newline / trailing whitespace / UTF-8 / LF
 #                             across every text file (.editorconfig)
@@ -142,6 +144,36 @@ if have shellcheck; then
 	report "shellcheck"
 else
 	skip "shellcheck" "apt-get install shellcheck"
+fi
+
+# ---------------------------------------------------------------------------
+# PSScriptAnalyzer — static analysis for the PowerShell updater script under
+# scripts/ (the same production-only scope as clang-tidy and shellcheck; the test
+# harness under tests/ is not analysed). Needs pwsh AND the PSScriptAnalyzer
+# module. Rules: PSScriptAnalyzerSettings.psd1. With --fix, the correctable rules
+# are auto-applied in place.
+if have pwsh; then
+	if pwsh -NoProfile -Command 'exit ([bool](Get-Module -ListAvailable PSScriptAnalyzer) ? 0 : 1)' \
+		>/dev/null 2>&1; then
+		echo "==> PSScriptAnalyzer (scripts/*.ps1)"
+		PSSA_FIX="\$false"
+		[ "$FIX" -eq 1 ] && PSSA_FIX="\$true"
+		pwsh -NoProfile -Command "
+			\$ErrorActionPreference = 'Stop'
+			Import-Module PSScriptAnalyzer
+			\$p = @{ Path = 'scripts'; Settings = './PSScriptAnalyzerSettings.psd1'; Fix = $PSSA_FIX }
+			\$r = Invoke-ScriptAnalyzer @p
+			if (\$r) {
+				\$r | Format-Table -AutoSize Severity, RuleName, ScriptName, Line, Message
+				exit 1
+			}
+			exit 0"
+		report "PSScriptAnalyzer"
+	else
+		skip "PSScriptAnalyzer" "pwsh: Install-Module PSScriptAnalyzer -Scope CurrentUser"
+	fi
+else
+	skip "pwsh (PSScriptAnalyzer)" "install PowerShell 7 (pwsh)"
 fi
 
 # ---------------------------------------------------------------------------
