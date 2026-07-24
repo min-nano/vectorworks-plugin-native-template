@@ -37,6 +37,7 @@ scripts/
 .clang-tidy                 C/C++ 静的解析チェックの設定（WarningsAsErrors）
 .cmake-format.yaml          CMake の整形（cmake-format）＋ lint（cmake-lint）設定
 .yamllint.yaml              YAML の構造スタイル（yamllint）設定
+PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）のルール設定
 .editorconfig              エディタ側のインデント／改行／文字コード規則
 .editorconfig-checker.json  上記を CI で強制する editorconfig-checker の設定
 .github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドする
@@ -395,6 +396,13 @@ C/C++ を対象とするジョブ:
   静的解析します。
 - **`shellcheck`** — `scripts/` 配下のスタンドアロンなシェルスクリプトを解析
   します（ワークフロー内のインラインスクリプトは actionlint が担当）。
+- **`PSScriptAnalyzer`** — Windows 版アップデータ（`scripts/vw-update.ps1`）の
+  PowerShell 静的解析です。未承認の動詞・未使用パラメータ・危険な null 比較など
+  バグを招きやすいパターンを検出します。clang-tidy（`src/` の実ロジックのみ）や
+  shellcheck（`scripts/*.sh` のみ）と同じく、テストハーネス（`tests/`）ではなく
+  `scripts/` 配下の**本番スクリプト**を対象にします。ルールは
+  `PSScriptAnalyzerSettings.psd1`（デフォルト全ルールから、このスクリプトの意図的な
+  設計と衝突する数個だけを除外）で管理し、残った検出はすべて CI を失敗させます。
 - **`yamllint`** — ワークフローや Dependabot 設定など YAML の構造スタイル
   （インデント・キー重複・記号まわりの空白）を `.yamllint.yaml` に照らして
   チェックします。

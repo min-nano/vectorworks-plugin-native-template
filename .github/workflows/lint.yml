@@ -23,6 +23,10 @@ name: Lint
 #   * actionlint    — validates the GitHub workflows themselves and runs
 #                     shellcheck over every inline `run:` script in them.
 #   * shellcheck    — the stand-alone shell scripts under scripts/.
+#   * PSScriptAnalyzer — static analysis for the PowerShell updater script under
+#                     scripts/ (unapproved verbs, unused params, unsafe patterns),
+#                     per PSScriptAnalyzerSettings.psd1. Scoped to the production
+#                     script like clang-tidy/shellcheck, not the tests.
 #   * yamllint      — structural YAML style (.yamllint.yaml) for the workflows
 #                     and Dependabot config.
 #   * editorconfig  — final newline, no trailing whitespace, UTF-8 and LF across
@@ -39,6 +43,7 @@ name: Lint
 #     cmake-format --check CMakeLists.txt tests/CMakeLists.txt && cmake-lint ...
 #     actionlint
 #     shellcheck scripts/*.sh
+#     pwsh -c 'Invoke-ScriptAnalyzer -Path scripts -Settings ./PSScriptAnalyzerSettings.psd1'
 #     yamllint .
 #     editorconfig-checker
 
@@ -64,6 +69,7 @@ env:
   YAMLLINT_VERSION: "1.38.0"
   ACTIONLINT_VERSION: "v1.7.12"
   EDITORCONFIG_CHECKER_VERSION: "v3.8.0"
+  PSSCRIPTANALYZER_VERSION: "1.24.0"    # PowerShell static analysis
 
 jobs:
   clang-format:
@@ -189,6 +195,46 @@ jobs:
           set -euo pipefail
           shellcheck --version
           shellcheck scripts/*.sh
+
+  # PSScriptAnalyzer over the stand-alone PowerShell script (the Windows updater,
+  # scripts/vw-update.ps1). This is PowerShell's counterpart to clang-tidy and
+  # shellcheck: it flags bug-prone patterns, unapproved cmdlet verbs, unused
+  # parameters, unsafe null comparisons and the like. Like clang-tidy (the SDK-free
+  # src/ logic, not the tests) and shellcheck (scripts/*.sh, not tests/), it lints
+  # the production script under scripts/ — not the test harness under tests/, whose
+  # test doubles legitimately override built-in cmdlets and leave stubs unused. The
+  # rule set (full defaults minus a few that conflict with the script's deliberate
+  # design) lives in PSScriptAnalyzerSettings.psd1; every surviving finding fails
+  # the job. pwsh is preinstalled on the runner. Reproduce locally with
+  # scripts/lint.sh (which runs the exact same command).
+  psscriptanalyzer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer `
+            -RequiredVersion $env:PSSCRIPTANALYZER_VERSION `
+            -Scope CurrentUser -Force
+
+      # Analyse every *.ps1 directly under scripts/ (non-recursive, so it never
+      # reaches tests/). Any finding is printed and turned into a non-zero exit.
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module PSScriptAnalyzer
+          $results = Invoke-ScriptAnalyzer -Path scripts `
+            -Settings ./PSScriptAnalyzerSettings.psd1
+          if ($results) {
+            $results | Format-Table -AutoSize Severity, RuleName, ScriptName, Line, Message
+            throw "PSScriptAnalyzer found $($results.Count) issue(s)."
+          }
+          Write-Host 'PSScriptAnalyzer: no issues.'
 
   # Structural YAML style (indentation, duplicate keys, spacing) for the
   # workflows and Dependabot config, per .yamllint.yaml.
