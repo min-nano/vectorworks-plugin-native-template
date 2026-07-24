@@ -173,9 +173,16 @@ if ($MyInvocation.InvocationName -ne '.') {
 各スクリプトに残る OS 固有の面（`.sh` の osascript ダイアログ・`codesign` / `xattr` の
 再署名・`PlistBuddy`、`.ps1` の `%APPDATA%` 既定パス）は、その OS でしか動かないため、
 C++ 側が `dladdr` / `gSDK` のグルーを対象外にしているのと同様、手動／e2e に委ねます。
-必要なツール（`.sh`: python3 / unzip / zip、`.ps1`: `pwsh`）が無い環境では、ハーネス自体が
-自動で SKIP、あるいは CMake がそのテストを登録しません（`scripts/lint.sh` の `skip` と
-同じ方針）。
+必要なツール（`.sh`: python3 / unzip / zip、`.ps1`: `pwsh`）が無い**ローカル**環境では、
+ハーネス自体が自動で SKIP、あるいは CMake がそのテストを登録しません（`scripts/lint.sh` の
+`skip` と同じ方針）。
+
+ただし **CI では黙ってスキップさせません**。ツールが欠けたまま「テストが 1 件も走らずに緑」
+になるのを防ぐため、`-DVW_REQUIRE_SCRIPT_TESTS=ON`（Tests ワークフローが指定）を付けると
+挙動が逆転します。インタプリタ（`bash` / `pwsh`）が無ければ **configure が FATAL_ERROR** で
+失敗し、ハーネスに渡す補助ツール（python3 / unzip / zip）が無ければ **ハーネスが SKIP では
+なく exit 1** で失敗します。この値は各ハーネスの環境変数 `VW_REQUIRE_SCRIPT_TESTS` として
+渡され、ローカル既定（OFF）では従来どおり穏やかに SKIP します。
 
 ## それでも残る部分
 

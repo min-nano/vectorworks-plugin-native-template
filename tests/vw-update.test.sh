@@ -37,18 +37,36 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${HERE}/../scripts/vw-update.sh"
 
 # ---------------------------------------------------------------------------
-# Skip gracefully (exit 0) rather than fail if a tool the harness needs is not
-# present, so the same suite is safe to run under ctest on any developer box.
+# Missing-tool policy. On a developer box a missing helper skips gracefully
+# (exit 0) so `ctest` stays green without the macOS back-end deps installed.
+# In CI, though, a silent skip would let the suite "pass" without ever running
+# a single check — so when VW_REQUIRE_SCRIPT_TESTS is set (the Tests workflow
+# sets it), a missing tool is a HARD FAILURE instead. Common falsy spellings
+# count as unset so `VW_REQUIRE_SCRIPT_TESTS=0` still means "skip is OK".
 # ---------------------------------------------------------------------------
+REQUIRE_TOOLS="${VW_REQUIRE_SCRIPT_TESTS:-}"
+case "$REQUIRE_TOOLS" in
+	'' | 0 | off | OFF | false | FALSE | no | NO) REQUIRE_TOOLS="" ;;
+esac
+
+# skip_or_fail <reason> — SKIP (exit 0) locally, ERROR (exit 1) when tests are
+# required, so a missing dependency can never masquerade as a passing run in CI.
+skip_or_fail() {
+	if [ -n "$REQUIRE_TOOLS" ]; then
+		echo "ERROR vw-update.test.sh: $1 (VW_REQUIRE_SCRIPT_TESTS is set, refusing to skip)." >&2
+		exit 1
+	fi
+	echo "SKIP vw-update.test.sh: $1."
+	exit 0
+}
+
 for tool in python3 unzip zip; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
-		echo "SKIP vw-update.test.sh: '$tool' not found (macOS updater back-end tests need it)."
-		exit 0
+		skip_or_fail "'$tool' not found (macOS updater back-end tests need it)"
 	fi
 done
 if [ ! -f "$SCRIPT" ]; then
-	echo "SKIP vw-update.test.sh: $SCRIPT not found."
-	exit 0
+	skip_or_fail "$SCRIPT not found"
 fi
 
 # ---------------------------------------------------------------------------
