@@ -28,6 +28,16 @@ if(VW_ENABLE_SANITIZERS AND NOT (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
 	message(FATAL_ERROR "VW_ENABLE_SANITIZERS requires GCC or Clang.")
 endif()
 
+# Whether the bundled-updater-script tests are REQUIRED to run (CI) instead of
+# being skipped when their interpreter or a helper tool is missing. OFF for a
+# plain local build, so a developer without pwsh (or the macOS back-end deps)
+# still gets a clean `ctest`. The Tests workflow turns it ON, which makes a
+# missing interpreter a configure-time error and tells each harness to FAIL
+# (not skip) on a missing tool — so the script tests can never silently pass
+# without actually running in CI.
+option(VW_REQUIRE_SCRIPT_TESTS
+	"Fail rather than skip the updater-script tests when a tool is missing" OFF)
+
 function(vw_add_test name)
 	add_executable(${name} ${ARGN})
 	target_compile_features(${name} PRIVATE cxx_std_20)
@@ -83,12 +93,25 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 # Each is registered only when its interpreter is found, and each harness itself
 # skips (exit 0) when a tool it needs is missing.
 
+# VW_REQUIRE_SCRIPT_TESTS is threaded into each harness' environment so a missing
+# helper tool (python3/unzip/zip inside the bash suite) fails instead of skipping.
+# The value is passed through verbatim; the harnesses treat falsy spellings as
+# unset, so an OFF build still skips gracefully.
+
 # macOS updater (scripts/vw-update.sh) via bash + stubbed curl/plutil.
 if(NOT WIN32)
 	find_program(BASH_PROGRAM bash)
 	if(BASH_PROGRAM)
 		add_test(NAME UpdaterScriptTests COMMAND "${BASH_PROGRAM}"
 												 "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.test.sh")
+		set_tests_properties(
+			UpdaterScriptTests PROPERTIES ENVIRONMENT
+			"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+	elseif(VW_REQUIRE_SCRIPT_TESTS)
+		message(
+			FATAL_ERROR
+			"VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the macOS "
+			"updater-script tests (vw-update.test.sh) cannot run.")
 	endif()
 endif()
 
@@ -98,4 +121,12 @@ find_program(PWSH_PROGRAM pwsh)
 if(PWSH_PROGRAM)
 	add_test(NAME UpdaterScriptTestsPs COMMAND "${PWSH_PROGRAM}" -NoProfile -File
 											   "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.Tests.ps1")
+	set_tests_properties(
+		UpdaterScriptTestsPs PROPERTIES ENVIRONMENT
+		"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+elseif(VW_REQUIRE_SCRIPT_TESTS)
+	message(
+		FATAL_ERROR
+		"VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
+		"the Windows updater-script tests (vw-update.Tests.ps1) cannot run.")
 endif()

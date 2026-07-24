@@ -32,9 +32,27 @@ Set-StrictMode -Version Latest
 
 $Here   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script = Join-Path $Here '..' 'scripts' 'vw-update.ps1'
-if (-not (Test-Path -LiteralPath $Script)) {
-    Write-Output "SKIP vw-update.Tests.ps1: $Script not found."
+
+# Missing-dependency policy, matching vw-update.test.sh: a developer box skips
+# gracefully (exit 0), but in CI a silent skip would let the suite "pass"
+# without running a single check. When VW_REQUIRE_SCRIPT_TESTS is set (the Tests
+# workflow sets it), a missing prerequisite is a HARD FAILURE instead. Common
+# falsy spellings count as unset so VW_REQUIRE_SCRIPT_TESTS=0 still means
+# "skip is OK".
+$RequireTools = -not ([string]::IsNullOrEmpty($env:VW_REQUIRE_SCRIPT_TESTS) -or
+    ($env:VW_REQUIRE_SCRIPT_TESTS -in @('0', 'off', 'OFF', 'false', 'FALSE', 'no', 'NO')))
+
+function Skip-Or-Fail([string] $Reason) {
+    if ($RequireTools) {
+        Write-Error "vw-update.Tests.ps1: $Reason (VW_REQUIRE_SCRIPT_TESTS is set, refusing to skip)."
+        exit 1
+    }
+    Write-Output "SKIP vw-update.Tests.ps1: $Reason."
     exit 0
+}
+
+if (-not (Test-Path -LiteralPath $Script)) {
+    Skip-Or-Fail "$Script not found"
 }
 
 # Scratch plug-ins folder. Set VW_PLUGINS_DIR BEFORE dot-sourcing so the script's

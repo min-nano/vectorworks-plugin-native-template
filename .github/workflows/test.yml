@@ -48,22 +48,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # cmake + g++ for the C++ tests; python3/zip/unzip are the helpers the bash
+      # updater-script harness (tests/vw-update.test.sh) stubs the JSON/zip I/O
+      # with. pwsh (for the PowerShell harness) is preinstalled on the runner —
+      # VW_REQUIRE_SCRIPT_TESTS below turns a missing one into a hard error, so a
+      # dropped dependency fails CI instead of silently skipping the tests.
       - name: Install build tools
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake g++
+          sudo apt-get install -y --no-install-recommends cmake g++ python3 zip unzip
 
       # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan (no
       # coverage — that is the separate `coverage` job). g++ ships libasan /
       # libubsan, so no extra packages are needed. No SDK required.
+      # VW_REQUIRE_SCRIPT_TESTS=ON makes the updater-script tests mandatory: a
+      # missing interpreter (bash/pwsh) fails configuration and a missing helper
+      # tool fails the harness, so CI can never go green without running them.
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DVW_BUILD_PLUGIN=OFF \
             -DVW_BUILD_TESTS=ON \
-            -DVW_ENABLE_SANITIZERS=ON
+            -DVW_ENABLE_SANITIZERS=ON \
+            -DVW_REQUIRE_SCRIPT_TESTS=ON
 
       - name: Build tests
         run: cmake --build build -v
