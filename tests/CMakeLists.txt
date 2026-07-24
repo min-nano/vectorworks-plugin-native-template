@@ -36,7 +36,7 @@ endif()
 # (not skip) on a missing tool — so the script tests can never silently pass
 # without actually running in CI.
 option(VW_REQUIRE_SCRIPT_TESTS
-	"Fail rather than skip the updater-script tests when a tool is missing" OFF)
+	   "Fail rather than skip the updater-script tests when a tool is missing" OFF)
 
 function(vw_add_test name)
 	add_executable(${name} ${ARGN})
@@ -106,12 +106,10 @@ if(NOT WIN32)
 												 "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.test.sh")
 		set_tests_properties(
 			UpdaterScriptTests PROPERTIES ENVIRONMENT
-			"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+										  "VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
 	elseif(VW_REQUIRE_SCRIPT_TESTS)
-		message(
-			FATAL_ERROR
-			"VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the macOS "
-			"updater-script tests (vw-update.test.sh) cannot run.")
+		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the macOS "
+							"updater-script tests (vw-update.test.sh) cannot run.")
 	endif()
 endif()
 
@@ -123,10 +121,8 @@ if(PWSH_PROGRAM)
 											   "${CMAKE_CURRENT_SOURCE_DIR}/vw-update.Tests.ps1")
 	set_tests_properties(
 		UpdaterScriptTestsPs PROPERTIES ENVIRONMENT
-		"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+										"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
 elseif(VW_REQUIRE_SCRIPT_TESTS)
-	message(
-		FATAL_ERROR
-		"VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
-		"the Windows updater-script tests (vw-update.Tests.ps1) cannot run.")
+	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
+						"the Windows updater-script tests (vw-update.Tests.ps1) cannot run.")
 endif()
