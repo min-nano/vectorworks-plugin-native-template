@@ -78,6 +78,20 @@ jobs:
           # Build the resolved commit (PR head, or the pushed/ dispatched sha).
           ref: ${{ steps.ctx.outputs.sha }}
 
+      # How wide to fan the build out. Everything below that can run
+      # concurrently — the compile itself and the clang-tidy pass — is given
+      # this number, so the job uses the whole runner instead of one core.
+      # Read from the machine rather than hard-coded, so the build keeps
+      # saturating the runner if GitHub changes its size. `nproc` is GNU
+      # coreutils (absent on macOS), `getconf` is the POSIX fallback that
+      # answers there; 2 is a last-resort floor.
+      - name: Detect CPU count
+        run: |
+          set -euo pipefail
+          n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          echo "Running the build with $n parallel jobs."
+          echo "NPROC=$n" >> "$GITHUB_ENV"
+
       - name: Select Xcode 16.2
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
@@ -166,15 +180,27 @@ jobs:
           brew install llvm@18
           tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
           "$tidy" --version
-          "$tidy" -p build --warnings-as-errors='*' \
+          # One clang-tidy process per source, NPROC of them at a time. Each
+          # translation unit is analysed independently and read-only (CI never
+          # passes --fix), so there is nothing to serialise. xargs runs EVERY
+          # file even after one reports a finding, then exits non-zero, so a
+          # single run still lists every problem. Diagnostics from different
+          # files may interleave; each carries its own file:line, so they stay
+          # attributable.
+          printf '%s\n' \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \
-            src/UpdaterFlow.cpp
+            src/UpdaterFlow.cpp \
+            | xargs -P "$NPROC" -n 1 "$tidy" -p build --warnings-as-errors='*'
 
       - name: Build
         # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) bundles.
-        run: cmake --build build --config Release -v
+        # --parallel spreads the two targets' translation units across all cores
+        # (the Makefile generator compiles them strictly one at a time without
+        # it). The two targets are independent, so both plug-ins' sources are in
+        # flight at once.
+        run: cmake --build build --config Release --parallel "$NPROC" -v
 
       # Apple Silicon requires every Mach-O to carry a code signature. We use a
       # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
@@ -277,6 +303,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ steps.ctx.outputs.sha }}
+
+      # Same fan-out width as the macOS job (see the comment there). On this
+      # runner `nproc` comes from the bundled Git-for-Windows coreutils.
+      - name: Detect CPU count
+        shell: bash
+        run: |
+          set -euo pipefail
+          n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          echo "Running the build with $n parallel jobs."
+          echo "NPROC=$n" >> "$GITHUB_ENV"
 
       # Restore the previously trimmed SDK if we have it. Only the pieces needed
       # to build a Windows plug-in are kept, so the cache is small.
@@ -410,17 +446,26 @@ jobs:
           # calling ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
           # -fdelayed-template-parsing so those SDK templates parse as they do in
           # the real MSVC build; our own (non-template) code is still analyzed.
-          "$tidy" -p build-tidy --warnings-as-errors='*' \
-            --extra-arg=-fdelayed-template-parsing \
+          #
+          # Fanned out over NPROC processes, one per source — the same reasoning
+          # as the macOS job: each translation unit is analysed independently and
+          # read-only, and xargs still visits every file before failing.
+          printf '%s\n' \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \
-            src/UpdaterFlow.cpp
+            src/UpdaterFlow.cpp \
+            | xargs -P "$NPROC" -n 1 "$tidy" -p build-tidy --warnings-as-errors='*' \
+                --extra-arg=-fdelayed-template-parsing
 
       - name: Build
         # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) modules.
+        # --parallel becomes MSBuild's /m:N, which builds the two plug-in PROJECTS
+        # at the same time; the /MP flag set in CMakeLists.txt is what parallelises
+        # the sources WITHIN each project. Both are needed — either alone leaves
+        # most of the runner idle.
         shell: bash
-        run: cmake --build build --config Release -v
+        run: cmake --build build --config Release --parallel "$NPROC" -v
 
       - name: Inspect built plug-ins
         shell: bash

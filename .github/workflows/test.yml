@@ -59,6 +59,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake g++ python3 zip unzip
 
+      # How wide to fan the work out: the test executables are compiled with
+      # --parallel, and ctest runs the suites concurrently with the same number.
+      # Read from the machine rather than hard-coded, so the job keeps using the
+      # whole runner if GitHub changes its size.
+      - name: Detect CPU count
+        run: |
+          set -euo pipefail
+          n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          echo "Running with $n parallel jobs."
+          echo "NPROC=$n" >> "$GITHUB_ENV"
+
       # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan (no
       # coverage — that is the separate `coverage` job). g++ ships libasan /
       # libubsan, so no extra packages are needed. No SDK required.
@@ -74,17 +85,25 @@ jobs:
             -DVW_ENABLE_SANITIZERS=ON \
             -DVW_REQUIRE_SCRIPT_TESTS=ON
 
+      # The three test executables are independent targets, so --parallel builds
+      # them (and their translation units) at the same time.
       - name: Build tests
-        run: cmake --build build -v
+        run: cmake --build build --parallel "$NPROC" -v
 
       # abort_on_error/halt_on_error make the first sanitizer report fatal (the
       # build already passes -fno-sanitize-recover=all); detect_leaks catches
       # leaked allocations at exit; print_stacktrace points UBSan at the line.
+      #
+      # --parallel runs the suites concurrently. They are safe to overlap: each
+      # is a separate process that touches no shared state, and the two
+      # updater-script harnesses do their file I/O inside a per-run temporary
+      # directory of their own. --output-on-failure still prints the full log of
+      # whichever suite fails, so interleaving never hides the cause.
       - name: Run tests (ASan + UBSan)
         env:
           ASAN_OPTIONS: abort_on_error=1:detect_leaks=1:strict_string_checks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --parallel "$NPROC"
 
   coverage:
     # Runs only if `test` succeeded, so a coverage-job failure is unambiguously
@@ -118,6 +137,14 @@ jobs:
           # "externally-managed-environment" error and puts `diff-cover` on PATH.
           pipx install diff-cover
 
+      # Same fan-out width as the `test` job above.
+      - name: Detect CPU count
+        run: |
+          set -euo pipefail
+          n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          echo "Running with $n parallel jobs."
+          echo "NPROC=$n" >> "$GITHUB_ENV"
+
       # Same tests, this time instrumented for gcov so running them emits
       # coverage data.
       - name: Configure (with coverage)
@@ -129,12 +156,15 @@ jobs:
             -DVW_ENABLE_COVERAGE=ON
 
       - name: Build tests
-        run: cmake --build build -v
+        run: cmake --build build --parallel "$NPROC" -v
 
       # `test` already gated pass/fail; here we just need the run to emit .gcda
-      # coverage data next to the objects.
+      # coverage data next to the objects. Running the suites in parallel does
+      # not disturb that: gcov writes one .gcda per object file, and each test
+      # target has its own object directory, so no two processes write the same
+      # counter file.
       - name: Run tests (produce coverage data)
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --parallel "$NPROC"
 
       # Emit a Cobertura XML report over the plug-in sources under src/. The
       # build tree holds the gcov data; --root . keeps paths repo-relative so

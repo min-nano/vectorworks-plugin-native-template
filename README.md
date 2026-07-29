@@ -112,10 +112,12 @@ Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）と **mac SDK**
 
    ```sh
    cmake -S . -B build -DVW_SDK_DIR=/path/to/2026-NNA-eng-mac-SDK
-   cmake --build build --config Release
+   cmake --build build --config Release --parallel "$(sysctl -n hw.logicalcpu)"
    ```
 
-   成果物は `build/SamplePlugin.vwlibrary` です。
+   成果物は `build/SamplePlugin.vwlibrary` です。`--parallel` を付けないと
+   既定の Makefile ジェネレータはソースを 1 本ずつ順番にコンパイルします
+   （詳細は後述の「[ビルドの並列化](#ビルドの並列化)」）。
 
 既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
 
@@ -136,7 +138,7 @@ Visual Studio 2022（v143 ツールセット、x64）と **win SDK** が必要�
 
    ```pwsh
    cmake -S . -B build -A x64 -DVW_SDK_DIR=C:/path/to/2026-NNA-eng-win-SDK
-   cmake --build build --config Release
+   cmake --build build --config Release --parallel $env:NUMBER_OF_PROCESSORS
    ```
 
    成果物は `build/Release/SamplePlugin.vlb`（DLL）と、その隣の
@@ -157,6 +159,58 @@ macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<n
 > リンクもできません）。したがって ARM 向けの別ビルドは不要です。macOS 側で
 > `arm64`／ユニバーサルにできるのは、Vectorworks Mac がネイティブ Apple Silicon
 > アプリだからです。
+
+### ビルドの並列化
+
+`cmake --build` は既定では**逐次**です。このリポジトリはプラグインを 2 つ
+（`SamplePlugin` と `SamplePluginDev`）× ソース 4 本 = 8 翻訳単位ビルドするうえ、
+SDK ヘッダはテンプレートが重く 1 本あたりのコンパイルが長いので、並列化の効果が
+そのまま実時間に効きます。使う並列度は `--parallel <N>`（または環境変数
+`CMAKE_BUILD_PARALLEL_LEVEL`）で指定します:
+
+```sh
+# macOS / Linux
+cmake --build build --config Release --parallel "$(getconf _NPROCESSORS_ONLN)"
+```
+
+```pwsh
+# Windows
+cmake --build build --config Release --parallel $env:NUMBER_OF_PROCESSORS
+```
+
+ジェネレータごとに `--parallel` の効き方が違う点に注意してください:
+
+- **Makefile / Ninja（macOS・Linux）** … `-j N` に相当し、ターゲットをまたいで
+  翻訳単位が同時にコンパイルされます。これだけで並列化は完結します。
+- **Visual Studio（Windows）** … MSBuild の `/m:N` に相当し、並列になるのは
+  **プロジェクト単位**だけです。プラグインは 2 つしかないので、これだけでは
+  2 倍で頭打ちになります。そこで `CMakeLists.txt` は MSVC ビルドに **`/MP`** を
+  付けており、各プロジェクト**内部**のソースもコア数だけ同時にコンパイルされます。
+  実際の速度はほぼこちらで決まります。
+  なお Windows では 2 つのプラグインが**同じ出力フォルダ**（`build/Release`）に
+  出力され、どちらの POST_BUILD も `vw-update.ps1` を**同じパス**へコピーします。
+  プロジェクトが同時に走ると 2 つのコピーがぶつかる（共有違反）ため、
+  `CMakeLists.txt` は Windows に限って `add_dependencies` で 2 つのプロジェクトを
+  順番に並べています。`/MP` だけでコアは埋まるので、これによる実時間の損失は
+  ほとんどありません。macOS はプラグインごとに別バンドルなので衝突せず、
+  2 つのターゲットが完全に並列でビルドされます。
+
+CI（`.github/workflows/build.yml`、`test.yml`）も同じ設定です。各ジョブは先頭で
+ランナーのコア数を検出して `NPROC` に入れ、それを `cmake --build --parallel`、
+`ctest --parallel`、そして clang-tidy の `xargs -P` に渡します。ランナーのサイズが
+変わっても追随できるよう、コア数はハードコードせず実行時に取得しています。
+
+ユニットテストも同様に並列でビルド・実行できます:
+
+```sh
+cmake --build build-tests --parallel "$(getconf _NPROCESSORS_ONLN)"
+ctest --test-dir build-tests --output-on-failure --parallel "$(getconf _NPROCESSORS_ONLN)"
+```
+
+テストスイートは互いに独立したプロセスで、updater スクリプトのハーネスも実行ごとに
+専用の一時ディレクトリを作るため、同時実行しても干渉しません。カバレッジ計測時も
+`.gcda` はターゲットごとのオブジェクトディレクトリに分かれて書かれるので、並列実行で
+壊れることはありません。
 
 ## インストールと実行（社内 / 未署名での利用）
 
@@ -237,16 +291,16 @@ Windows 版 `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell
 
 ```bash
 cmake -S . -B build-tests -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
-cmake --build build-tests
-ctest --test-dir build-tests --output-on-failure
+cmake --build build-tests --parallel "$(getconf _NPROCESSORS_ONLN)"
+ctest --test-dir build-tests --output-on-failure --parallel "$(getconf _NPROCESSORS_ONLN)"
 ```
 
 サニタイザ（AddressSanitizer + UBSan）を有効にして回す（メモリ不正・未定義動作の検出）:
 
 ```bash
 cmake -S . -B build-san -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
-cmake --build build-san
-ctest --test-dir build-san --output-on-failure
+cmake --build build-san --parallel "$(getconf _NPROCESSORS_ONLN)"
+ctest --test-dir build-san --output-on-failure --parallel "$(getconf _NPROCESSORS_ONLN)"
 ```
 
 CI の `test` ジョブは常にこの設定でテストを回すため、リファクタが招くメモリ不正
@@ -306,8 +360,8 @@ CI の `test` ジョブは常にこの設定でテストを回すため、リフ
 
 ```bash
 cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_COVERAGE=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
+ctest --test-dir build --output-on-failure --parallel "$(getconf _NPROCESSORS_ONLN)"
 gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-summary
 # 差分カバレッジ（例: origin/main と比較）
 diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cover.md

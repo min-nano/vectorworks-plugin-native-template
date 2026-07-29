@@ -27,9 +27,15 @@ cmake_minimum_required(VERSION 3.20)
 # Point CMake at the SDK folder that CONTAINS "SDKLib" via -DVW_SDK_DIR=/path
 # (or the VW_SDK_DIR environment variable). Example:
 #   macOS:   cmake -S . -B build -DVW_SDK_DIR=/path/to/2026-NNA-eng-mac-SDK
-#            cmake --build build --config Release
+#            cmake --build build --config Release --parallel 8
 #   Windows: cmake -S . -B build -DVW_SDK_DIR=C:/path/to/2026-NNA-eng-win-SDK
-#            cmake --build build --config Release
+#            cmake --build build --config Release --parallel 8
+#
+# `cmake --build` is SERIAL unless told otherwise, and this project builds two
+# plug-ins x four sources against template-heavy SDK headers, so always pass
+# --parallel <cores> (or set CMAKE_BUILD_PARALLEL_LEVEL). On Windows that flag
+# only parallelises across PROJECTS; the /MP compile option set below adds the
+# parallelism WITHIN each project. See "ビルドの並列化" in README.md.
 #
 
 # --- Architecture / deployment target (macOS only; set before project()) ----
@@ -283,7 +289,14 @@ if(VW_BUILD_PLUGIN)
 
 			# /bigobj: the template-heavy SDK headers overflow the default section
 			# limit. /wd4996: silence deprecation warnings (parallels the mac flag).
-			target_compile_options(${target} PRIVATE /EHsc /bigobj /wd4996)
+			# /MP: compile this target's translation units in PARALLEL (one cl.exe
+			# per core). `cmake --build --parallel N` maps to MSBuild's /m:N, which
+			# only parallelises across PROJECTS — with two plug-in targets that
+			# alone caps the speed-up at 2x and leaves each target's sources
+			# compiling one after another. /MP adds the within-target parallelism.
+			# The Makefile/Ninja generators (macOS, Linux) get both for free from
+			# --parallel, so this flag is only needed on the MSVC side.
+			target_compile_options(${target} PRIVATE /EHsc /bigobj /wd4996 /MP)
 
 			# The host Vectorworks.exe provides the actual SDK functions through the
 			# callback pointer (GS_InitializeVCOM), so we link only the SDK's static
@@ -367,6 +380,26 @@ if(VW_BUILD_PLUGIN)
 		"com.example.vectorworks.SamplePluginDev"
 		"dev"
 		DEV)
+
+	# Keep the two Windows modules from building at the SAME time.
+	#
+	# On Windows both plug-ins land in one output directory ("build/Release"),
+	# and each one's POST_BUILD copies scripts/vw-update.ps1 to the same path
+	# beside itself — one destination file written by two commands. Serial
+	# builds got away with it; once `cmake --build --parallel` lets MSBuild run
+	# both projects at once, the two copies overlap and Windows fails the second
+	# one with a sharing violation. Ordering the projects removes the overlap.
+	#
+	# This costs almost nothing: /MP (set above) already compiles each project's
+	# four sources across all cores, so a single project saturates the machine
+	# and project-level concurrency was never where the speed-up came from.
+	#
+	# macOS needs no such ordering — there each plug-in is a separate .vwlibrary
+	# bundle, so the copies have distinct destinations and the two targets are
+	# free to build fully in parallel.
+	if(WIN32)
+		add_dependencies(SamplePluginDev SamplePlugin)
+	endif()
 
 endif() # VW_BUILD_PLUGIN
 

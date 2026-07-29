@@ -81,26 +81,35 @@
 
 ```sh
 cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
+ctest --test-dir build --output-on-failure --parallel "$(getconf _NPROCESSORS_ONLN)"
 ```
+
+`--parallel` はビルドと実行のどちらにも効きます。3 つのテスト実行ファイルは独立した
+ターゲットなので同時にコンパイルでき、各スイートも互いに状態を共有しない別プロセスで
+（updater スクリプトのハーネスは実行ごとに専用の一時ディレクトリを作ります）、
+同時実行しても干渉しません。CI（`.github/workflows/test.yml`）も同じ指定です。
 
 カバレッジ（gcov/gcovr。GCC か Clang が必要）:
 
 ```sh
 cmake -S . -B buildcov -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_COVERAGE=ON
-cmake --build buildcov
-ctest --test-dir buildcov
+cmake --build buildcov --parallel "$(getconf _NPROCESSORS_ONLN)"
+ctest --test-dir buildcov --parallel "$(getconf _NPROCESSORS_ONLN)"
 gcovr --root . --filter 'src/.*' buildcov --txt --print-summary
 ```
+
+並列実行でもカバレッジは壊れません。`.gcda` はオブジェクトファイル単位で書かれ、
+テストターゲットごとにオブジェクトディレクトリが分かれているため、2 つのプロセスが
+同じカウンタファイルに書き込むことはありません。
 
 サニタイザ（ASan + UBSan。GCC か Clang が必要）で回す:
 
 ```sh
 cmake -S . -B buildsan -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
-cmake --build buildsan
+cmake --build buildsan --parallel "$(getconf _NPROCESSORS_ONLN)"
 ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
-    ctest --test-dir buildsan --output-on-failure
+    ctest --test-dir buildsan --output-on-failure --parallel "$(getconf _NPROCESSORS_ONLN)"
 ```
 
 `-DVW_ENABLE_SANITIZERS=ON` を付けると、各テストバイナリが
