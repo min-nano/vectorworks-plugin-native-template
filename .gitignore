@@ -27,7 +27,9 @@ coverage.xml
 xcuserdata/
 .vscode/
 
-# ローカルビルド（各自の CMakeUserPresets.json。プリセット vw2026 のビルド先は build-vw2026/）
+# 手元のビルド（プリセット vw2026 など）。各自の設定と、版ごとのビルド先 build-<版>/
 /CMakeUserPresets.json
-/build-vw2026/
+/build-*/
+
+# Claude Code の各自の設定
 /.claude/settings.local.json
