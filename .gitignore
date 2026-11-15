@@ -26,3 +26,10 @@ coverage.xml
 *.xcuserstate
 xcuserdata/
 .vscode/
+
+# 手元のビルド（プリセット vw2026 など）。各自の設定と、版ごとのビルド先 build-<版>/
+/CMakeUserPresets.json
+/build-*/
+
+# Claude Code の各自の設定
+/.claude/settings.local.json
